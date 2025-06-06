@@ -51,6 +51,12 @@ func (h *BotHandlers) handleMessage(message *tgbotapi.Message) {
 		h.handleGathering(message)
 	case "🔨 Рабочее место":
 		h.handleWorkplace(message)
+	case "🛠 Верстак":
+		h.handleWorkbench(message)
+	case "🧱 Печь":
+		h.handleFurnace(message)
+	case "🔥 Костер":
+		h.handleCampfire(message)
 	default:
 		// Неизвестная команда
 		msg := tgbotapi.NewMessage(message.Chat.ID, "Неизвестная команда. Используйте /start для начала игры.")
@@ -232,7 +238,26 @@ func (h *BotHandlers) handleGathering(message *tgbotapi.Message) {
 }
 
 func (h *BotHandlers) handleWorkplace(message *tgbotapi.Message) {
-	msg := tgbotapi.NewMessage(message.Chat.ID, "🔨 Функция рабочего места пока в разработке...")
+	workplaceText := `🔨 Ты подходишь к рабочему месту.
+
+Здесь можно создавать новые предметы и обрабатывать ресурсы.`
+
+	msg := tgbotapi.NewMessage(message.Chat.ID, workplaceText)
+	h.sendWorkplaceKeyboard(msg)
+}
+
+func (h *BotHandlers) handleWorkbench(message *tgbotapi.Message) {
+	msg := tgbotapi.NewMessage(message.Chat.ID, "🛠 Функция верстака пока в разработке...")
+	h.bot.Send(msg)
+}
+
+func (h *BotHandlers) handleFurnace(message *tgbotapi.Message) {
+	msg := tgbotapi.NewMessage(message.Chat.ID, "🧱 Функция печи пока в разработке...")
+	h.bot.Send(msg)
+}
+
+func (h *BotHandlers) handleCampfire(message *tgbotapi.Message) {
+	msg := tgbotapi.NewMessage(message.Chat.ID, "🔥 Функция костра пока в разработке...")
 	h.bot.Send(msg)
 }
 
@@ -245,6 +270,22 @@ func (h *BotHandlers) sendWithKeyboard(msg tgbotapi.MessageConfig) {
 		),
 		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton("🔨 Рабочее место"),
+		),
+	)
+	keyboard.ResizeKeyboard = true
+	msg.ReplyMarkup = keyboard
+	h.bot.Send(msg)
+}
+
+func (h *BotHandlers) sendWorkplaceKeyboard(msg tgbotapi.MessageConfig) {
+	// Создаем клавиатуру рабочего места
+	keyboard := tgbotapi.NewReplyKeyboard(
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton("🛠 Верстак"),
+			tgbotapi.NewKeyboardButton("🧱 Печь"),
+		),
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton("🔥 Костер"),
 		),
 	)
 	keyboard.ResizeKeyboard = true
