@@ -1,0 +1,9 @@
+.idea
+.vscode
+.vault
+.eslintcache
+.env
+coverage.out
+node_modules
+*.iml
+/.vale
