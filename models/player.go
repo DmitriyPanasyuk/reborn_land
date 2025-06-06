@@ -28,3 +28,16 @@ type InventoryItem struct {
 	Durability int    `json:"durability"`
 	Type       string `json:"type"`
 }
+
+type Recipe struct {
+	ID          int                `json:"id"`
+	ItemID      int                `json:"item_id"`
+	ItemName    string             `json:"item_name"`
+	Ingredients []RecipeIngredient `json:"ingredients"`
+}
+
+type RecipeIngredient struct {
+	ItemID   int    `json:"item_id"`
+	ItemName string `json:"item_name"`
+	Quantity int    `json:"quantity"`
+}

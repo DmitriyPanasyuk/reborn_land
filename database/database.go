@@ -2,6 +2,7 @@ package database
 
 import (
 	"database/sql"
+	"fmt"
 	"reborn_land/models"
 
 	_ "github.com/lib/pq"
@@ -92,6 +93,17 @@ func (db *DB) seedItems() error {
 		{"Простой топор", "tool", 100},
 		{"Простой нож", "tool", 100},
 		{"Лесная ягода", "food", 0},
+		{"Простая кирка", "tool", 100},
+		{"Простой лук", "tool", 100},
+		{"Стрелы", "ammunition", 0},
+		{"Простая удочка", "tool", 100},
+		{"Деревянный брусок", "material", 0},
+		{"Камень", "material", 0},
+		{"Сухожилие", "material", 0},
+		{"Перо", "material", 0},
+		{"Кость", "material", 0},
+		{"Веревка", "material", 0},
+		{"Крючок", "material", 0},
 	}
 
 	for _, item := range items {
@@ -217,6 +229,58 @@ func (db *DB) GetPlayerInventory(playerID int) ([]models.InventoryItem, error) {
 	}
 
 	return items, nil
+}
+
+func (db *DB) GetItemQuantityInInventory(playerID int, itemName string) (int, error) {
+	var quantity int
+	err := db.conn.QueryRow(`
+		SELECT COALESCE(SUM(i.quantity), 0)
+		FROM inventory i
+		JOIN items it ON i.item_id = it.id
+		WHERE i.player_id = $1 AND it.name = $2`,
+		playerID, itemName,
+	).Scan(&quantity)
+
+	return quantity, err
+}
+
+func (db *DB) GetRecipeRequirements(itemName string) ([]models.RecipeIngredient, error) {
+	// Возвращаем статические рецепты для демонстрации
+	// В будущем это можно вынести в отдельную таблицу
+	recipes := map[string][]models.RecipeIngredient{
+		"Простой топор": {
+			{ItemName: "Деревянный брусок", Quantity: 1},
+			{ItemName: "Камень", Quantity: 1},
+		},
+		"Простая кирка": {
+			{ItemName: "Деревянный брусок", Quantity: 1},
+			{ItemName: "Камень", Quantity: 1},
+		},
+		"Простой лук": {
+			{ItemName: "Деревянный брусок", Quantity: 1},
+			{ItemName: "Сухожилие", Quantity: 1},
+		},
+		"Стрелы": {
+			{ItemName: "Деревянный брусок", Quantity: 1},
+			{ItemName: "Камень", Quantity: 1},
+			{ItemName: "Перо", Quantity: 1},
+		},
+		"Простой нож": {
+			{ItemName: "Деревянный брусок", Quantity: 1},
+			{ItemName: "Кость", Quantity: 1},
+		},
+		"Простая удочка": {
+			{ItemName: "Деревянный брусок", Quantity: 1},
+			{ItemName: "Веревка", Quantity: 1},
+			{ItemName: "Крючок", Quantity: 1},
+		},
+	}
+
+	if recipe, exists := recipes[itemName]; exists {
+		return recipe, nil
+	}
+
+	return nil, fmt.Errorf("recipe not found for item: %s", itemName)
 }
 
 func (db *DB) Close() error {

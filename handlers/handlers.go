@@ -29,6 +29,9 @@ func (h *BotHandlers) HandleUpdate(update tgbotapi.Update) {
 	if update.Message != nil {
 		h.handleMessage(update.Message)
 	}
+	if update.CallbackQuery != nil {
+		h.handleCallbackQuery(update.CallbackQuery)
+	}
 }
 
 func (h *BotHandlers) handleMessage(message *tgbotapi.Message) {
@@ -57,6 +60,20 @@ func (h *BotHandlers) handleMessage(message *tgbotapi.Message) {
 		h.handleFurnace(message)
 	case "🔥 Костер":
 		h.handleCampfire(message)
+	case "◀️ Назад":
+		h.handleBack(message)
+	case "/create_axe":
+		h.handleCreateAxe(message)
+	case "/create_pickaxe":
+		h.handleCreatePickaxe(message)
+	case "/create_bow":
+		h.handleCreateBow(message)
+	case "/create_arrows":
+		h.handleCreateArrows(message)
+	case "/create_knife":
+		h.handleCreateKnife(message)
+	case "/create_fishing_rod":
+		h.handleCreateFishingRod(message)
 	default:
 		// Неизвестная команда
 		msg := tgbotapi.NewMessage(message.Chat.ID, "Неизвестная команда. Используйте /start для начала игры.")
@@ -247,7 +264,16 @@ func (h *BotHandlers) handleWorkplace(message *tgbotapi.Message) {
 }
 
 func (h *BotHandlers) handleWorkbench(message *tgbotapi.Message) {
-	msg := tgbotapi.NewMessage(message.Chat.ID, "🛠 Функция верстака пока в разработке...")
+	workbenchText := `🛠 Доступные предметы для создания:
+
+Простой топор — /create_axe
+Простая кирка — /create_pickaxe
+Простой лук — /create_bow
+Стрелы — /create_arrows
+Простой нож — /create_knife
+Простая удочка — /create_fishing_rod`
+
+	msg := tgbotapi.NewMessage(message.Chat.ID, workbenchText)
 	h.bot.Send(msg)
 }
 
@@ -259,6 +285,104 @@ func (h *BotHandlers) handleFurnace(message *tgbotapi.Message) {
 func (h *BotHandlers) handleCampfire(message *tgbotapi.Message) {
 	msg := tgbotapi.NewMessage(message.Chat.ID, "🔥 Функция костра пока в разработке...")
 	h.bot.Send(msg)
+}
+
+func (h *BotHandlers) handleBack(message *tgbotapi.Message) {
+	msg := tgbotapi.NewMessage(message.Chat.ID, "🏠 Возвращаемся к главному меню.")
+	h.sendWithKeyboard(msg)
+}
+
+func (h *BotHandlers) handleCreateAxe(message *tgbotapi.Message) {
+	h.showRecipe(message, "Простой топор")
+}
+
+func (h *BotHandlers) handleCreatePickaxe(message *tgbotapi.Message) {
+	h.showRecipe(message, "Простая кирка")
+}
+
+func (h *BotHandlers) handleCreateBow(message *tgbotapi.Message) {
+	h.showRecipe(message, "Простой лук")
+}
+
+func (h *BotHandlers) handleCreateArrows(message *tgbotapi.Message) {
+	h.showRecipe(message, "Стрелы")
+}
+
+func (h *BotHandlers) handleCreateKnife(message *tgbotapi.Message) {
+	h.showRecipe(message, "Простой нож")
+}
+
+func (h *BotHandlers) handleCreateFishingRod(message *tgbotapi.Message) {
+	h.showRecipe(message, "Простая удочка")
+}
+
+func (h *BotHandlers) showRecipe(message *tgbotapi.Message, itemName string) {
+	userID := message.From.ID
+
+	// Получаем игрока
+	player, err := h.db.GetPlayer(userID)
+	if err != nil {
+		log.Printf("Error getting player: %v", err)
+		msg := tgbotapi.NewMessage(message.Chat.ID, "Сначала зарегистрируйтесь с помощью команды /start")
+		h.bot.Send(msg)
+		return
+	}
+
+	// Получаем рецепт
+	recipe, err := h.db.GetRecipeRequirements(itemName)
+	if err != nil {
+		log.Printf("Error getting recipe: %v", err)
+		msg := tgbotapi.NewMessage(message.Chat.ID, "Ошибка получения рецепта.")
+		h.bot.Send(msg)
+		return
+	}
+
+	// Формируем текст рецепта
+	recipeText := fmt.Sprintf(`Для изготовления предмета "%s" необходимо следующее:`, itemName)
+	canCraft := true
+
+	for _, ingredient := range recipe {
+		playerQuantity, err := h.db.GetItemQuantityInInventory(player.ID, ingredient.ItemName)
+		if err != nil {
+			log.Printf("Error getting inventory quantity: %v", err)
+			playerQuantity = 0
+		}
+
+		if playerQuantity < ingredient.Quantity {
+			canCraft = false
+		}
+
+		recipeText += fmt.Sprintf("\n%s - %d/%d шт.", ingredient.ItemName, playerQuantity, ingredient.Quantity)
+	}
+
+	// Добавляем кнопку "Создать"
+	var buttonText string
+	if canCraft {
+		buttonText = "Создать ✅"
+	} else {
+		buttonText = "Создать ❌"
+	}
+
+	msg := tgbotapi.NewMessage(message.Chat.ID, recipeText)
+
+	// Создаем инлайн клавиатуру с кнопкой создать
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(buttonText, fmt.Sprintf("craft_%s", itemName)),
+		),
+	)
+	msg.ReplyMarkup = keyboard
+	h.bot.Send(msg)
+}
+
+func (h *BotHandlers) handleCallbackQuery(callback *tgbotapi.CallbackQuery) {
+	// Пока заглушка для callback
+	msg := tgbotapi.NewMessage(callback.Message.Chat.ID, "🔨 Функция создания предметов пока в разработке...")
+	h.bot.Send(msg)
+
+	// Отвечаем на callback query, чтобы убрать индикатор загрузки
+	callbackConfig := tgbotapi.NewCallback(callback.ID, "")
+	h.bot.Request(callbackConfig)
 }
 
 func (h *BotHandlers) sendWithKeyboard(msg tgbotapi.MessageConfig) {
@@ -286,6 +410,9 @@ func (h *BotHandlers) sendWorkplaceKeyboard(msg tgbotapi.MessageConfig) {
 		),
 		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton("🔥 Костер"),
+		),
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton("◀️ Назад"),
 		),
 	)
 	keyboard.ResizeKeyboard = true
