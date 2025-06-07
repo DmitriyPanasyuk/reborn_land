@@ -62,6 +62,16 @@ func (h *BotHandlers) handleMessage(message *tgbotapi.Message) {
 		h.handleCampfire(message)
 	case "◀️ Назад":
 		h.handleBack(message)
+	case "⬅️ Назад":
+		h.handleBack(message)
+	case "⛏ Шахта":
+		h.handleMine(message)
+	case "🌾 Поле":
+		h.handleField(message)
+	case "🎣 Озеро":
+		h.handleLake(message)
+	case "🏞 Лес":
+		h.handleForest(message)
 	case "/create_axe":
 		h.handleCreateAxe(message)
 	case "/create_pickaxe":
@@ -250,8 +260,17 @@ func (h *BotHandlers) handleInventory(message *tgbotapi.Message) {
 }
 
 func (h *BotHandlers) handleGathering(message *tgbotapi.Message) {
-	msg := tgbotapi.NewMessage(message.Chat.ID, "🌿 Функция добычи ресурсов пока в разработке...")
-	h.bot.Send(msg)
+	gatheringText := `🌿 Ты собрался в путь за ресурсами.
+
+Выбери, куда хочешь отправиться:
+
+🏞 Лес — древесина, охота, ягоды  
+⛏ Шахта — камень, руда, уголь  
+🌾 Поле — травы, злаки, редкие растения  
+🎣 Озеро — рыбалка и вода`
+
+	msg := tgbotapi.NewMessage(message.Chat.ID, gatheringText)
+	h.sendGatheringKeyboard(msg)
 }
 
 func (h *BotHandlers) handleWorkplace(message *tgbotapi.Message) {
@@ -290,6 +309,26 @@ func (h *BotHandlers) handleCampfire(message *tgbotapi.Message) {
 func (h *BotHandlers) handleBack(message *tgbotapi.Message) {
 	msg := tgbotapi.NewMessage(message.Chat.ID, "🏠 Возвращаемся к главному меню.")
 	h.sendWithKeyboard(msg)
+}
+
+func (h *BotHandlers) handleMine(message *tgbotapi.Message) {
+	msg := tgbotapi.NewMessage(message.Chat.ID, "⛏ Функция шахты пока в разработке...")
+	h.bot.Send(msg)
+}
+
+func (h *BotHandlers) handleField(message *tgbotapi.Message) {
+	msg := tgbotapi.NewMessage(message.Chat.ID, "🌾 Функция поля пока в разработке...")
+	h.bot.Send(msg)
+}
+
+func (h *BotHandlers) handleLake(message *tgbotapi.Message) {
+	msg := tgbotapi.NewMessage(message.Chat.ID, "🎣 Функция озера пока в разработке...")
+	h.bot.Send(msg)
+}
+
+func (h *BotHandlers) handleForest(message *tgbotapi.Message) {
+	msg := tgbotapi.NewMessage(message.Chat.ID, "🏞 Функция леса пока в разработке...")
+	h.bot.Send(msg)
 }
 
 func (h *BotHandlers) handleCreateAxe(message *tgbotapi.Message) {
@@ -413,6 +452,26 @@ func (h *BotHandlers) sendWorkplaceKeyboard(msg tgbotapi.MessageConfig) {
 		),
 		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton("◀️ Назад"),
+		),
+	)
+	keyboard.ResizeKeyboard = true
+	msg.ReplyMarkup = keyboard
+	h.bot.Send(msg)
+}
+
+func (h *BotHandlers) sendGatheringKeyboard(msg tgbotapi.MessageConfig) {
+	// Создаем клавиатуру добычи ресурсов
+	keyboard := tgbotapi.NewReplyKeyboard(
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton("⛏ Шахта"),
+			tgbotapi.NewKeyboardButton("🌾 Поле"),
+		),
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton("🎣 Озеро"),
+			tgbotapi.NewKeyboardButton("🏞 Лес"),
+		),
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton("⬅️ Назад"),
 		),
 	)
 	keyboard.ResizeKeyboard = true
