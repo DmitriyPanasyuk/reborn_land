@@ -62,8 +62,6 @@ func (h *BotHandlers) handleMessage(message *tgbotapi.Message) {
 		h.handleCampfire(message)
 	case "◀️ Назад":
 		h.handleBack(message)
-	case "⬅️ Назад":
-		h.handleBack(message)
 	case "⛏ Шахта":
 		h.handleMine(message)
 	case "🌾 Поле":
@@ -471,7 +469,7 @@ func (h *BotHandlers) sendGatheringKeyboard(msg tgbotapi.MessageConfig) {
 			tgbotapi.NewKeyboardButton("🏞 Лес"),
 		),
 		tgbotapi.NewKeyboardButtonRow(
-			tgbotapi.NewKeyboardButton("⬅️ Назад"),
+			tgbotapi.NewKeyboardButton("◀️ Назад"),
 		),
 	)
 	keyboard.ResizeKeyboard = true
