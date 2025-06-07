@@ -324,14 +324,41 @@ func (db *DB) GetOrCreateMine(playerID int) (*models.Mine, error) {
 	return &mine, err
 }
 
-func (db *DB) UpdateMineExperience(playerID int, expGained int) error {
-	_, err := db.conn.Exec(`
+func (db *DB) UpdateMineExperience(playerID int, expGained int) (bool, int, error) {
+	// Получаем текущий уровень и опыт
+	var currentLevel, currentExp int
+	err := db.conn.QueryRow(`
+		SELECT level, experience 
+		FROM mines WHERE player_id = $1`,
+		playerID,
+	).Scan(&currentLevel, &currentExp)
+	if err != nil {
+		return false, 0, err
+	}
+
+	// Вычисляем новый опыт
+	newExp := currentExp + expGained
+
+	// Вычисляем новый уровень
+	newLevel := currentLevel
+	for newExp >= newLevel*100 {
+		newLevel++
+	}
+
+	// Обновляем данные в базе
+	_, err = db.conn.Exec(`
 		UPDATE mines 
-		SET experience = experience + $1
-		WHERE player_id = $2`,
-		expGained, playerID,
+		SET experience = $1, level = $2
+		WHERE player_id = $3`,
+		newExp, newLevel, playerID,
 	)
-	return err
+	if err != nil {
+		return false, 0, err
+	}
+
+	// Возвращаем информацию о повышении уровня
+	levelUp := newLevel > currentLevel
+	return levelUp, newLevel, nil
 }
 
 func (db *DB) SetMineExhausted(playerID int, exhausted bool) error {
@@ -394,13 +421,52 @@ func (db *DB) AddItemToInventory(playerID int, itemName string, quantity int) er
 	return err
 }
 
-func (db *DB) UpdatePlayerSatiety(playerID int, satietyLoss int) error {
+func (db *DB) UpdatePlayerSatiety(playerID int, satietyChange int) error {
 	_, err := db.conn.Exec(`
 		UPDATE players 
-		SET satiety = GREATEST(satiety - $1, 0)
+		SET satiety = LEAST(GREATEST(satiety + $1, 0), 100)
 		WHERE id = $2`,
-		satietyLoss, playerID,
+		satietyChange, playerID,
 	)
+	return err
+}
+
+func (db *DB) ConsumeItem(playerID int, itemName string, quantity int) error {
+	// Получаем ID предмета
+	var itemID int
+	err := db.conn.QueryRow("SELECT id FROM items WHERE name = $1", itemName).Scan(&itemID)
+	if err != nil {
+		return err
+	}
+
+	// Уменьшаем количество предмета в инвентаре
+	result, err := db.conn.Exec(`
+		UPDATE inventory 
+		SET quantity = quantity - $1
+		WHERE player_id = $2 AND item_id = $3 AND quantity >= $1`,
+		quantity, playerID, itemID,
+	)
+	if err != nil {
+		return err
+	}
+
+	// Проверяем, был ли обновлен хотя бы один ряд
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("insufficient quantity of item %s", itemName)
+	}
+
+	// Удаляем предметы с количеством 0
+	_, err = db.conn.Exec(`
+		DELETE FROM inventory 
+		WHERE player_id = $1 AND item_id = $2 AND quantity <= 0`,
+		playerID, itemID,
+	)
+
 	return err
 }
 
