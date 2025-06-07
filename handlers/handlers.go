@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"log"
 	"reborn_land/database"
+	"reborn_land/models"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -15,6 +17,9 @@ type BotHandlers struct {
 	bot            *tgbotapi.BotAPI
 	db             *database.DB
 	waitingForName map[int64]bool
+	mineSessions   map[int64]*models.MineSession
+	miningTimers   map[int64]*time.Timer
+	mineCooldowns  map[int64]time.Time // Время окончания кулдауна шахты
 }
 
 func New(bot *tgbotapi.BotAPI, db *database.DB) *BotHandlers {
@@ -22,6 +27,9 @@ func New(bot *tgbotapi.BotAPI, db *database.DB) *BotHandlers {
 		bot:            bot,
 		db:             db,
 		waitingForName: make(map[int64]bool),
+		mineSessions:   make(map[int64]*models.MineSession),
+		miningTimers:   make(map[int64]*time.Timer),
+		mineCooldowns:  make(map[int64]time.Time),
 	}
 }
 
@@ -305,13 +313,256 @@ func (h *BotHandlers) handleCampfire(message *tgbotapi.Message) {
 }
 
 func (h *BotHandlers) handleBack(message *tgbotapi.Message) {
-	msg := tgbotapi.NewMessage(message.Chat.ID, "🏠 Возвращаемся к главному меню.")
-	h.sendWithKeyboard(msg)
+	userID := message.From.ID
+	chatID := message.Chat.ID
+
+	// Проверяем, идет ли добыча ресурса
+	if _, isMining := h.miningTimers[userID]; isMining {
+		// Если идет добыча, не позволяем выйти
+		msg := tgbotapi.NewMessage(chatID, "Идет добыча ресурса.")
+		h.bot.Send(msg)
+		return
+	}
+
+	// Проверяем, есть ли активная сессия шахты
+	if session, exists := h.mineSessions[userID]; exists {
+		// Удаляем сообщение с полем шахты
+		deleteFieldMsg := tgbotapi.NewDeleteMessage(chatID, session.FieldMessageID)
+		h.bot.Request(deleteFieldMsg)
+
+		// Удаляем сообщение с информацией о шахте
+		deleteInfoMsg := tgbotapi.NewDeleteMessage(chatID, session.InfoMessageID)
+		h.bot.Request(deleteInfoMsg)
+
+		// Удаляем сессию шахты
+		delete(h.mineSessions, userID)
+
+		// Возвращаемся в меню добычи
+		msg := tgbotapi.NewMessage(chatID, "🌿 Выберите место для добычи ресурсов:")
+		h.sendGatheringKeyboard(msg)
+	} else {
+		// Обычное возвращение в главное меню
+		msg := tgbotapi.NewMessage(chatID, "🏠 Возвращаемся к главному меню.")
+		h.sendWithKeyboard(msg)
+	}
 }
 
 func (h *BotHandlers) handleMine(message *tgbotapi.Message) {
-	msg := tgbotapi.NewMessage(message.Chat.ID, "⛏ Функция шахты пока в разработке...")
-	h.bot.Send(msg)
+	userID := message.From.ID
+
+	// Проверяем, активен ли кулдаун шахты
+	if cooldownEnd, exists := h.mineCooldowns[userID]; exists {
+		if time.Now().Before(cooldownEnd) {
+			// Кулдаун еще активен
+			remainingTime := time.Until(cooldownEnd)
+			msg := tgbotapi.NewMessage(message.Chat.ID,
+				fmt.Sprintf("До обновления шахты осталось %d сек.", int(remainingTime.Seconds())))
+			h.bot.Send(msg)
+			return
+		} else {
+			// Кулдаун истек, удаляем его
+			delete(h.mineCooldowns, userID)
+		}
+	}
+
+	// Получаем игрока
+	player, err := h.db.GetPlayer(userID)
+	if err != nil {
+		log.Printf("Error getting player: %v", err)
+		msg := tgbotapi.NewMessage(message.Chat.ID, "Сначала зарегистрируйтесь с помощью команды /start")
+		h.bot.Send(msg)
+		return
+	}
+
+	// Получаем или создаем шахту
+	mine, err := h.db.GetOrCreateMine(player.ID)
+	if err != nil {
+		log.Printf("Error getting mine: %v", err)
+		msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка при работе с шахтой.")
+		h.bot.Send(msg)
+		return
+	}
+
+	// Если шахта была истощена в базе данных, восстанавливаем её
+	if mine.IsExhausted {
+		h.db.SetMineExhausted(player.ID, false)
+		mine.IsExhausted = false
+	}
+
+	// Создаем новую сессию шахты
+	h.createNewMineSession(userID, message.Chat.ID, mine)
+}
+
+func (h *BotHandlers) createNewMineSession(userID int64, chatID int64, mine *models.Mine) {
+	// Генерируем случайное поле
+	field := h.generateRandomMineField()
+
+	// Показываем поле и получаем MessageID
+	fieldMessageID, infoMessageID := h.showMineField(chatID, mine, field)
+
+	// Создаем сессию
+	session := &models.MineSession{
+		PlayerID:       userID,
+		Resources:      field,
+		IsActive:       true,
+		IsMining:       false,
+		StartedAt:      time.Now(),
+		FieldMessageID: fieldMessageID,
+		InfoMessageID:  infoMessageID,
+	}
+
+	h.mineSessions[userID] = session
+}
+
+func (h *BotHandlers) showMineField(chatID int64, mine *models.Mine, field [][]string) (int, int) {
+	// Создаем инлайн клавиатуру на основе переданного поля
+	var keyboard [][]tgbotapi.InlineKeyboardButton
+	for i := 0; i < 3; i++ {
+		var row []tgbotapi.InlineKeyboardButton
+		for j := 0; j < 3; j++ {
+			cell := field[i][j]
+			var callbackData string
+
+			switch cell {
+			case "🪨":
+				callbackData = fmt.Sprintf("mine_stone_%d_%d", i, j)
+			case "⚫":
+				callbackData = fmt.Sprintf("mine_coal_%d_%d", i, j)
+			default:
+				callbackData = fmt.Sprintf("mine_empty_%d_%d", i, j)
+				cell = " "
+			}
+
+			button := tgbotapi.NewInlineKeyboardButtonData(cell, callbackData)
+			row = append(row, button)
+		}
+		keyboard = append(keyboard, row)
+	}
+
+	// Сначала отправляем поле шахты с инлайн кнопками
+	fieldMsg := tgbotapi.NewMessage(chatID, "Выберите ресурс для добычи:")
+	fieldMsg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(keyboard...)
+	fieldResponse, _ := h.bot.Send(fieldMsg)
+
+	// Затем отправляем информационное сообщение с клавиатурой
+	// Вычисляем опыт до следующего уровня
+	expToNext := mine.Level*100 - mine.Experience
+
+	infoText := fmt.Sprintf(`⛏ Шахта (Уровень %d)
+До следующего уровня: %d опыта
+
+Доступные ресурсы:
+🪨 Камень
+⚫ Уголь`, mine.Level, expToNext)
+
+	mineKeyboard := tgbotapi.NewReplyKeyboard(
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton("◀️ Назад"),
+		),
+	)
+	mineKeyboard.ResizeKeyboard = true
+
+	infoMsg := tgbotapi.NewMessage(chatID, infoText)
+	infoMsg.ReplyMarkup = mineKeyboard
+	infoResponse, _ := h.bot.Send(infoMsg)
+
+	// Возвращаем ID поля и ID информационного сообщения
+	return fieldResponse.MessageID, infoResponse.MessageID
+}
+
+func (h *BotHandlers) generateRandomMineField() [][]string {
+	// Создаем пустое поле 3x3
+	field := make([][]string, 3)
+	for i := range field {
+		field[i] = make([]string, 3)
+	}
+
+	// Доступные ресурсы
+	availableResources := []string{"🪨", "⚫"}
+
+	// Используем время для псевдослучайности
+	now := time.Now()
+	seed := now.UnixNano()
+
+	// Создаем список всех позиций
+	positions := [][2]int{
+		{0, 0}, {0, 1}, {0, 2},
+		{1, 0}, {1, 1}, {1, 2},
+		{2, 0}, {2, 1}, {2, 2},
+	}
+
+	// Перемешиваем позиции с использованием времени
+	for i := len(positions) - 1; i > 0; i-- {
+		j := int((seed + int64(i*13)) % int64(i+1))
+		positions[i], positions[j] = positions[j], positions[i]
+	}
+
+	// Размещаем 3 ресурса в первых 3 позициях
+	for i := 0; i < 3; i++ {
+		pos := positions[i]
+		// Выбираем ресурс псевдослучайно
+		resourceIndex := int((seed + int64(i*17) + int64(pos[0]*3) + int64(pos[1])) % int64(len(availableResources)))
+		resourceType := availableResources[resourceIndex]
+		field[pos[0]][pos[1]] = resourceType
+	}
+
+	return field
+}
+
+func (h *BotHandlers) createProgressBar(current, total int) string {
+	// Создаем прогресс бар из 10 блоков
+	barLength := 10
+	filled := (current * barLength) / total
+	if filled > barLength {
+		filled = barLength
+	}
+
+	progressBar := ""
+	for i := 0; i < barLength; i++ {
+		if i < filled {
+			progressBar += "🟩" // Заполненный блок
+		} else {
+			progressBar += "⬜" // Пустой блок
+		}
+	}
+
+	return progressBar
+}
+
+func (h *BotHandlers) updateMiningProgress(userID int64, chatID int64, messageID int, resourceName string, totalDuration int, durability int, row, col int) {
+	startTime := time.Now()
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			elapsed := time.Since(startTime).Seconds()
+			progress := int(elapsed)
+
+			if progress >= totalDuration {
+				// Добыча завершена
+				h.completeMining(userID, chatID, resourceName, durability, messageID, row, col)
+				return
+			}
+
+			// Обновляем прогресс бар
+			percentage := int((elapsed / float64(totalDuration)) * 100)
+			progressBar := h.createProgressBar(progress, totalDuration)
+
+			newText := fmt.Sprintf(`Началась добыча ресурса "%s". Время добычи %d сек.
+			
+%s %d%%`, resourceName, totalDuration, progressBar, percentage)
+
+			// Редактируем сообщение
+			editMsg := tgbotapi.NewEditMessageText(chatID, messageID, newText)
+			h.bot.Send(editMsg)
+
+		case <-time.After(time.Duration(totalDuration+1) * time.Second):
+			// Таймаут на случай, если что-то пошло не так
+			return
+		}
+	}
 }
 
 func (h *BotHandlers) handleField(message *tgbotapi.Message) {
@@ -413,13 +664,214 @@ func (h *BotHandlers) showRecipe(message *tgbotapi.Message, itemName string) {
 }
 
 func (h *BotHandlers) handleCallbackQuery(callback *tgbotapi.CallbackQuery) {
-	// Пока заглушка для callback
-	msg := tgbotapi.NewMessage(callback.Message.Chat.ID, "🔨 Функция создания предметов пока в разработке...")
-	h.bot.Send(msg)
+	userID := callback.From.ID
+	data := callback.Data
 
-	// Отвечаем на callback query, чтобы убрать индикатор загрузки
-	callbackConfig := tgbotapi.NewCallback(callback.ID, "")
+	// Обрабатываем callback'и от шахты
+	if strings.HasPrefix(data, "mine_stone_") {
+		parts := strings.Split(data, "_")
+		if len(parts) == 4 {
+			row, col := parts[2], parts[3]
+			h.startMiningAtPosition(userID, callback.Message.Chat.ID, "Камень", 10, callback.ID, row, col)
+		}
+	} else if strings.HasPrefix(data, "mine_coal_") {
+		parts := strings.Split(data, "_")
+		if len(parts) == 4 {
+			row, col := parts[2], parts[3]
+			h.startMiningAtPosition(userID, callback.Message.Chat.ID, "Уголь", 20, callback.ID, row, col)
+		}
+	} else if strings.HasPrefix(data, "mine_empty_") {
+		// Пустая ячейка
+		callbackConfig := tgbotapi.NewCallback(callback.ID, "Здесь нет ресурсов!")
+		h.bot.Request(callbackConfig)
+	} else {
+		// Остальные callback (крафт и т.д.)
+		msg := tgbotapi.NewMessage(callback.Message.Chat.ID, "🔨 Функция создания предметов пока в разработке...")
+		h.bot.Send(msg)
+		callbackConfig := tgbotapi.NewCallback(callback.ID, "")
+		h.bot.Request(callbackConfig)
+	}
+}
+
+func (h *BotHandlers) startMiningAtPosition(userID int64, chatID int64, resourceName string, duration int, callbackID string, rowStr, colStr string) {
+	row, _ := strconv.Atoi(rowStr)
+	col, _ := strconv.Atoi(colStr)
+
+	h.startMining(userID, chatID, resourceName, duration, callbackID, row, col)
+}
+
+func (h *BotHandlers) startMining(userID int64, chatID int64, resourceName string, duration int, callbackID string, row, col int) {
+	// Получаем игрока
+	player, err := h.db.GetPlayer(userID)
+	if err != nil {
+		log.Printf("Error getting player: %v", err)
+		return
+	}
+
+	// Проверяем наличие кирки
+	hasTool, durability, err := h.db.HasToolInInventory(player.ID, "Простая кирка")
+	if err != nil {
+		log.Printf("Error checking tool: %v", err)
+		return
+	}
+
+	if !hasTool {
+		msg := tgbotapi.NewMessage(chatID, `В инвентаре нет предмета "Простая кирка".`)
+		h.bot.Send(msg)
+		callbackConfig := tgbotapi.NewCallback(callbackID, "")
+		h.bot.Request(callbackConfig)
+		return
+	}
+
+	// Отвечаем на callback
+	callbackConfig := tgbotapi.NewCallback(callbackID, "")
 	h.bot.Request(callbackConfig)
+
+	// Удаляем предыдущее сообщение о результате добычи, если оно существует
+	if session, exists := h.mineSessions[userID]; exists && session.ResultMessageID != 0 {
+		deleteResultMsg := tgbotapi.NewDeleteMessage(chatID, session.ResultMessageID)
+		h.bot.Request(deleteResultMsg)
+		session.ResultMessageID = 0 // Сбрасываем ID
+	}
+
+	// Отправляем сообщение о начале добычи (не удаляем информационное сообщение)
+	initialText := fmt.Sprintf(`Началась добыча ресурса "%s". Время добычи %d сек.
+		
+%s 0%%`, resourceName, duration, h.createProgressBar(0, 10))
+
+	miningMsg := tgbotapi.NewMessage(chatID, initialText)
+	sentMsg, _ := h.bot.Send(miningMsg)
+
+	// Запускаем горутину для обновления прогресс бара
+	go h.updateMiningProgress(userID, chatID, sentMsg.MessageID, resourceName, duration, durability, row, col)
+
+	// Создаем заглушку таймера (основная логика теперь в updateMiningProgress)
+	timer := time.NewTimer(time.Duration(duration) * time.Second)
+	h.miningTimers[userID] = timer
+}
+
+func (h *BotHandlers) completeMining(userID int64, chatID int64, resourceName string, oldDurability int, messageID int, row, col int) {
+	// Получаем игрока
+	player, err := h.db.GetPlayer(userID)
+	if err != nil {
+		log.Printf("Error getting player: %v", err)
+		return
+	}
+
+	// Добавляем ресурс в инвентарь
+	h.db.AddItemToInventory(player.ID, resourceName, 1)
+
+	// Обновляем прочность кирки и сытость
+	h.db.UpdateItemDurability(player.ID, "Простая кирка", 1)
+	h.db.UpdatePlayerSatiety(player.ID, 1)
+
+	// Добавляем опыт шахте
+	h.db.UpdateMineExperience(player.ID, 2)
+
+	// Получаем обновленные данные
+	updatedPlayer, _ := h.db.GetPlayer(userID)
+	mine, _ := h.db.GetOrCreateMine(player.ID)
+
+	// Удаляем сообщение о добыче
+	deleteMsg := tgbotapi.NewDeleteMessage(chatID, messageID)
+	h.bot.Request(deleteMsg)
+
+	// Показываем результат
+	resultText := fmt.Sprintf(`✅ Ты добыл %s!
+Получено опыта: 2
+Сытость: %d/100
+Прочность кирки: %d/100
+До следующего уровня: %d опыта`,
+		resourceName,
+		updatedPlayer.Satiety,
+		oldDurability-1,
+		mine.Level*100-mine.Experience)
+
+	msg := tgbotapi.NewMessage(chatID, resultText)
+	resultResponse, _ := h.bot.Send(msg)
+
+	// Сохраняем ID сообщения с результатом в сессии
+	if session, exists := h.mineSessions[userID]; exists {
+		session.ResultMessageID = resultResponse.MessageID
+	}
+
+	// Кнопка "Назад" остается активной, не нужно восстанавливать
+
+	// Убираем таймер
+	delete(h.miningTimers, userID)
+
+	// Обновляем поле - убираем добытый ресурс
+	if session, exists := h.mineSessions[userID]; exists {
+		session.Resources[row][col] = ""
+
+		// Проверяем, остались ли ресурсы в поле
+		totalResources := 0
+		for i := 0; i < 3; i++ {
+			for j := 0; j < 3; j++ {
+				if session.Resources[i][j] != "" {
+					totalResources++
+				}
+			}
+		}
+
+		if totalResources > 0 {
+			// Обновляем инлайн клавиатуру с новым состоянием поля
+			h.updateMineField(chatID, mine, session.Resources, session.FieldMessageID)
+		} else {
+			// Поле истощено, устанавливаем кулдаун
+			h.db.ExhaustMine(userID)
+
+			// Устанавливаем таймер кулдауна на 60 секунд
+			h.mineCooldowns[userID] = time.Now().Add(60 * time.Second)
+
+			// Удаляем сообщение с полем шахты
+			deleteFieldMsg := tgbotapi.NewDeleteMessage(chatID, session.FieldMessageID)
+			h.bot.Request(deleteFieldMsg)
+
+			// Удаляем сообщение с информацией о шахте
+			deleteInfoMsg := tgbotapi.NewDeleteMessage(chatID, session.InfoMessageID)
+			h.bot.Request(deleteInfoMsg)
+
+			exhaustMsg := tgbotapi.NewMessage(chatID, `⚠️ Шахта истощена! Необходимо подождать 1 минуту до восстановления ресурсов.
+Нажми кнопку "⛏ Шахта" чтобы проверить готовность.`)
+			h.sendGatheringKeyboard(exhaustMsg)
+
+			// Удаляем сессию
+			delete(h.mineSessions, userID)
+		}
+	}
+}
+
+func (h *BotHandlers) updateMineField(chatID int64, mine *models.Mine, field [][]string, messageID int) {
+	text := "Выберите ресурс для добычи:"
+
+	// Создаем инлайн клавиатуру на основе переданного поля
+	var keyboard [][]tgbotapi.InlineKeyboardButton
+	for i := 0; i < 3; i++ {
+		var row []tgbotapi.InlineKeyboardButton
+		for j := 0; j < 3; j++ {
+			cell := field[i][j]
+			var callbackData string
+
+			switch cell {
+			case "🪨":
+				callbackData = fmt.Sprintf("mine_stone_%d_%d", i, j)
+			case "⚫":
+				callbackData = fmt.Sprintf("mine_coal_%d_%d", i, j)
+			default:
+				callbackData = fmt.Sprintf("mine_empty_%d_%d", i, j)
+				cell = " "
+			}
+
+			button := tgbotapi.NewInlineKeyboardButtonData(cell, callbackData)
+			row = append(row, button)
+		}
+		keyboard = append(keyboard, row)
+	}
+
+	// Редактируем существующее сообщение вместо отправки нового
+	editMsg := tgbotapi.NewEditMessageTextAndMarkup(chatID, messageID, text, tgbotapi.NewInlineKeyboardMarkup(keyboard...))
+	h.bot.Send(editMsg)
 }
 
 func (h *BotHandlers) sendWithKeyboard(msg tgbotapi.MessageConfig) {
@@ -448,6 +900,18 @@ func (h *BotHandlers) sendWorkplaceKeyboard(msg tgbotapi.MessageConfig) {
 		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton("🔥 Костер"),
 		),
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton("◀️ Назад"),
+		),
+	)
+	keyboard.ResizeKeyboard = true
+	msg.ReplyMarkup = keyboard
+	h.bot.Send(msg)
+}
+
+func (h *BotHandlers) sendMineKeyboard(msg tgbotapi.MessageConfig) {
+	// Создаем клавиатуру шахты
+	keyboard := tgbotapi.NewReplyKeyboard(
 		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton("◀️ Назад"),
 		),

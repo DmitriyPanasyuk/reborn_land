@@ -3,6 +3,7 @@ package database
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"reborn_land/models"
 
 	_ "github.com/lib/pq"
@@ -61,6 +62,14 @@ func (db *DB) createTables() error {
 			quantity INTEGER DEFAULT 1,
 			durability INTEGER DEFAULT 0
 		)`,
+		`CREATE TABLE IF NOT EXISTS mines (
+			id SERIAL PRIMARY KEY,
+			player_id INTEGER REFERENCES players(id),
+			level INTEGER DEFAULT 1,
+			experience INTEGER DEFAULT 0,
+			last_used TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			is_exhausted BOOLEAN DEFAULT false
+		)`,
 	}
 
 	for _, query := range queries {
@@ -73,18 +82,7 @@ func (db *DB) createTables() error {
 }
 
 func (db *DB) seedItems() error {
-	// Проверяем, есть ли уже предметы в базе
-	var count int
-	err := db.conn.QueryRow("SELECT COUNT(*) FROM items").Scan(&count)
-	if err != nil {
-		return err
-	}
-
-	if count > 0 {
-		return nil // Предметы уже есть
-	}
-
-	// Добавляем начальные предметы
+	// Список всех необходимых предметов
 	items := []struct {
 		name          string
 		itemType      string
@@ -99,6 +97,7 @@ func (db *DB) seedItems() error {
 		{"Простая удочка", "tool", 100},
 		{"Деревянный брусок", "material", 0},
 		{"Камень", "material", 0},
+		{"Уголь", "material", 0},
 		{"Сухожилие", "material", 0},
 		{"Перо", "material", 0},
 		{"Кость", "material", 0},
@@ -106,13 +105,27 @@ func (db *DB) seedItems() error {
 		{"Крючок", "material", 0},
 	}
 
+	// Добавляем каждый предмет, если его нет
 	for _, item := range items {
-		_, err := db.conn.Exec(
-			"INSERT INTO items (name, type, durability_max) VALUES ($1, $2, $3)",
-			item.name, item.itemType, item.durabilityMax,
-		)
+		var exists bool
+		err := db.conn.QueryRow(
+			"SELECT EXISTS(SELECT 1 FROM items WHERE name = $1)",
+			item.name,
+		).Scan(&exists)
+
 		if err != nil {
 			return err
+		}
+
+		if !exists {
+			_, err := db.conn.Exec(
+				"INSERT INTO items (name, type, durability_max) VALUES ($1, $2, $3)",
+				item.name, item.itemType, item.durabilityMax,
+			)
+			if err != nil {
+				return err
+			}
+			log.Printf("Added item: %s", item.name)
 		}
 	}
 
@@ -148,7 +161,7 @@ func (db *DB) CreatePlayer(telegramID int64, name string) (*models.Player, error
 
 func (db *DB) createStarterInventory(playerID int) error {
 	// Получаем ID предметов
-	var axeID, knifeID, berryID int
+	var axeID, knifeID, berryID, pickaxeID int
 
 	err := db.conn.QueryRow("SELECT id FROM items WHERE name = 'Простой топор'").Scan(&axeID)
 	if err != nil {
@@ -165,6 +178,11 @@ func (db *DB) createStarterInventory(playerID int) error {
 		return err
 	}
 
+	err = db.conn.QueryRow("SELECT id FROM items WHERE name = 'Простая кирка'").Scan(&pickaxeID)
+	if err != nil {
+		return err
+	}
+
 	// Добавляем в инвентарь
 	items := []struct {
 		itemID     int
@@ -173,6 +191,7 @@ func (db *DB) createStarterInventory(playerID int) error {
 	}{
 		{axeID, 1, 100},
 		{knifeID, 1, 100},
+		{pickaxeID, 1, 100},
 		{berryID, 10, 0},
 	}
 
@@ -281,6 +300,138 @@ func (db *DB) GetRecipeRequirements(itemName string) ([]models.RecipeIngredient,
 	}
 
 	return nil, fmt.Errorf("recipe not found for item: %s", itemName)
+}
+
+func (db *DB) GetOrCreateMine(playerID int) (*models.Mine, error) {
+	var mine models.Mine
+
+	// Пытаемся найти существующую шахту
+	err := db.conn.QueryRow(`
+		SELECT id, player_id, level, experience, last_used, is_exhausted 
+		FROM mines WHERE player_id = $1`, playerID,
+	).Scan(&mine.ID, &mine.PlayerID, &mine.Level, &mine.Experience, &mine.LastUsed, &mine.IsExhausted)
+
+	if err == sql.ErrNoRows {
+		// Создаем новую шахту
+		err = db.conn.QueryRow(`
+			INSERT INTO mines (player_id, level, experience, is_exhausted) 
+			VALUES ($1, 1, 0, false) 
+			RETURNING id, player_id, level, experience, last_used, is_exhausted`,
+			playerID,
+		).Scan(&mine.ID, &mine.PlayerID, &mine.Level, &mine.Experience, &mine.LastUsed, &mine.IsExhausted)
+	}
+
+	return &mine, err
+}
+
+func (db *DB) UpdateMineExperience(playerID int, expGained int) error {
+	_, err := db.conn.Exec(`
+		UPDATE mines 
+		SET experience = experience + $1
+		WHERE player_id = $2`,
+		expGained, playerID,
+	)
+	return err
+}
+
+func (db *DB) SetMineExhausted(playerID int, exhausted bool) error {
+	_, err := db.conn.Exec(`
+		UPDATE mines 
+		SET is_exhausted = $1, last_used = CURRENT_TIMESTAMP
+		WHERE player_id = $2`,
+		exhausted, playerID,
+	)
+	return err
+}
+
+func (db *DB) UpdateItemDurability(playerID int, itemName string, durabilityLoss int) error {
+	_, err := db.conn.Exec(`
+		UPDATE inventory 
+		SET durability = durability - $1
+		FROM items 
+		WHERE inventory.item_id = items.id 
+		AND inventory.player_id = $2 
+		AND items.name = $3 
+		AND inventory.durability > 0`,
+		durabilityLoss, playerID, itemName,
+	)
+	return err
+}
+
+func (db *DB) AddItemToInventory(playerID int, itemName string, quantity int) error {
+	// Сначала получаем ID предмета
+	var itemID int
+	err := db.conn.QueryRow("SELECT id FROM items WHERE name = $1", itemName).Scan(&itemID)
+	if err != nil {
+		return err
+	}
+
+	// Проверяем, есть ли уже этот предмет в инвентаре
+	var existingQuantity int
+	err = db.conn.QueryRow(`
+		SELECT quantity FROM inventory 
+		WHERE player_id = $1 AND item_id = $2`,
+		playerID, itemID,
+	).Scan(&existingQuantity)
+
+	if err == sql.ErrNoRows {
+		// Добавляем новый предмет
+		_, err = db.conn.Exec(`
+			INSERT INTO inventory (player_id, item_id, quantity, durability) 
+			VALUES ($1, $2, $3, 0)`,
+			playerID, itemID, quantity,
+		)
+	} else if err == nil {
+		// Увеличиваем количество существующего предмета
+		_, err = db.conn.Exec(`
+			UPDATE inventory 
+			SET quantity = quantity + $1
+			WHERE player_id = $2 AND item_id = $3`,
+			quantity, playerID, itemID,
+		)
+	}
+
+	return err
+}
+
+func (db *DB) UpdatePlayerSatiety(playerID int, satietyLoss int) error {
+	_, err := db.conn.Exec(`
+		UPDATE players 
+		SET satiety = GREATEST(satiety - $1, 0)
+		WHERE id = $2`,
+		satietyLoss, playerID,
+	)
+	return err
+}
+
+func (db *DB) HasToolInInventory(playerID int, toolName string) (bool, int, error) {
+	var durability int
+	err := db.conn.QueryRow(`
+		SELECT i.durability
+		FROM inventory i
+		JOIN items it ON i.item_id = it.id
+		WHERE i.player_id = $1 AND it.name = $2 AND i.quantity > 0 AND i.durability > 0`,
+		playerID, toolName,
+	).Scan(&durability)
+
+	if err == sql.ErrNoRows {
+		return false, 0, nil
+	}
+	if err != nil {
+		return false, 0, err
+	}
+
+	return true, durability, nil
+}
+
+func (db *DB) ExhaustMine(playerID int64) error {
+	_, err := db.conn.Exec(`
+		UPDATE mines 
+		SET is_exhausted = true, last_used = CURRENT_TIMESTAMP
+		WHERE player_id = $1`,
+		playerID,
+	)
+	return err
 }
 
 func (db *DB) Close() error {
