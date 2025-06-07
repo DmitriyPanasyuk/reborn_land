@@ -14,24 +14,30 @@ import (
 )
 
 type BotHandlers struct {
-	bot            *tgbotapi.BotAPI
-	db             *database.DB
-	waitingForName map[int64]bool
-	mineSessions   map[int64]*models.MineSession
-	miningTimers   map[int64]*time.Timer
-	mineCooldowns  map[int64]time.Time // Время окончания кулдауна шахты
-	playerLocation map[int64]string    // Текущее местоположение игрока
+	bot             *tgbotapi.BotAPI
+	db              *database.DB
+	waitingForName  map[int64]bool
+	mineSessions    map[int64]*models.MineSession
+	forestSessions  map[int64]*models.ForestSession
+	miningTimers    map[int64]*time.Timer
+	choppingTimers  map[int64]*time.Timer
+	mineCooldowns   map[int64]time.Time // Время окончания кулдауна шахты
+	forestCooldowns map[int64]time.Time // Время окончания кулдауна леса
+	playerLocation  map[int64]string    // Текущее местоположение игрока
 }
 
 func New(bot *tgbotapi.BotAPI, db *database.DB) *BotHandlers {
 	return &BotHandlers{
-		bot:            bot,
-		db:             db,
-		waitingForName: make(map[int64]bool),
-		mineSessions:   make(map[int64]*models.MineSession),
-		miningTimers:   make(map[int64]*time.Timer),
-		mineCooldowns:  make(map[int64]time.Time),
-		playerLocation: make(map[int64]string),
+		bot:             bot,
+		db:              db,
+		waitingForName:  make(map[int64]bool),
+		mineSessions:    make(map[int64]*models.MineSession),
+		forestSessions:  make(map[int64]*models.ForestSession),
+		miningTimers:    make(map[int64]*time.Timer),
+		choppingTimers:  make(map[int64]*time.Timer),
+		mineCooldowns:   make(map[int64]time.Time),
+		forestCooldowns: make(map[int64]time.Time),
+		playerLocation:  make(map[int64]string),
 	}
 }
 
@@ -403,10 +409,17 @@ func (h *BotHandlers) handleBack(message *tgbotapi.Message) {
 	userID := message.From.ID
 	chatID := message.Chat.ID
 
-	// Проверяем, идет ли добыча ресурса
+	// Проверяем, идет ли добыча ресурса или рубка
 	if _, isMining := h.miningTimers[userID]; isMining {
 		// Если идет добыча, не позволяем выйти
 		msg := tgbotapi.NewMessage(chatID, "Идет добыча ресурса.")
+		h.bot.Send(msg)
+		return
+	}
+
+	if _, isChopping := h.choppingTimers[userID]; isChopping {
+		// Если идет рубка, не позволяем выйти
+		msg := tgbotapi.NewMessage(chatID, "Идет рубка дерева.")
 		h.bot.Send(msg)
 		return
 	}
@@ -427,6 +440,25 @@ func (h *BotHandlers) handleBack(message *tgbotapi.Message) {
 		// Возвращаемся в меню добычи
 		msg := tgbotapi.NewMessage(chatID, "🌿 Выберите место для добычи ресурсов:")
 		h.sendGatheringKeyboard(msg)
+		return
+	}
+
+	// Проверяем, есть ли активная сессия леса
+	if session, exists := h.forestSessions[userID]; exists {
+		// Удаляем сообщение с полем леса
+		deleteFieldMsg := tgbotapi.NewDeleteMessage(chatID, session.FieldMessageID)
+		h.bot.Request(deleteFieldMsg)
+
+		// Удаляем сообщение с информацией о лесе
+		deleteInfoMsg := tgbotapi.NewDeleteMessage(chatID, session.InfoMessageID)
+		h.bot.Request(deleteInfoMsg)
+
+		// Удаляем сессию леса
+		delete(h.forestSessions, userID)
+
+		// Возвращаемся в меню леса
+		msg := tgbotapi.NewMessage(chatID, "🌲 Ты входишь в густой лес. Под ногами хрустит трава, в кронах поют птицы, а где-то вдалеке слышен треск ветки — ты здесь не один...\n\nЗдесь ты можешь:\n🪓 Рубить деревья\n🎯 Охотиться на дичь\n🌿 Собирать травы и ягоды")
+		h.sendForestKeyboard(msg)
 		return
 	}
 
@@ -701,8 +733,169 @@ func (h *BotHandlers) handleHunting(message *tgbotapi.Message) {
 }
 
 func (h *BotHandlers) handleChopping(message *tgbotapi.Message) {
-	msg := tgbotapi.NewMessage(message.Chat.ID, "🪓 Функция рубки деревьев пока в разработке...")
-	h.bot.Send(msg)
+	userID := message.From.ID
+
+	// Проверяем, активен ли кулдаун леса
+	if cooldownEnd, exists := h.forestCooldowns[userID]; exists {
+		if time.Now().Before(cooldownEnd) {
+			// Кулдаун еще активен
+			remainingTime := time.Until(cooldownEnd)
+			msg := tgbotapi.NewMessage(message.Chat.ID,
+				fmt.Sprintf("До обновления леса осталось %d сек.", int(remainingTime.Seconds())))
+			h.bot.Send(msg)
+			return
+		} else {
+			// Кулдаун истек, удаляем его
+			delete(h.forestCooldowns, userID)
+		}
+	}
+
+	// Получаем игрока
+	player, err := h.db.GetPlayer(userID)
+	if err != nil {
+		log.Printf("Error getting player: %v", err)
+		msg := tgbotapi.NewMessage(message.Chat.ID, "Сначала зарегистрируйтесь с помощью команды /start")
+		h.bot.Send(msg)
+		return
+	}
+
+	// Проверяем сытость игрока
+	if player.Satiety <= 0 {
+		msg := tgbotapi.NewMessage(message.Chat.ID, "Сытость 0. Необходимо поесть.")
+		h.bot.Send(msg)
+		return
+	}
+
+	// Получаем или создаем лес
+	forest, err := h.db.GetOrCreateForest(player.ID)
+	if err != nil {
+		log.Printf("Error getting forest: %v", err)
+		msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка при работе с лесом.")
+		h.bot.Send(msg)
+		return
+	}
+
+	// Если лес был истощен в базе данных, восстанавливаем его
+	if forest.IsExhausted {
+		h.db.SetForestExhausted(player.ID, false)
+		forest.IsExhausted = false
+	}
+
+	// Создаем новую сессию леса
+	h.createNewForestSession(userID, message.Chat.ID, forest)
+}
+
+func (h *BotHandlers) createNewForestSession(userID int64, chatID int64, forest *models.Forest) {
+	// Генерируем случайное поле
+	field := h.generateRandomForestField()
+
+	// Показываем поле и получаем MessageID
+	fieldMessageID, infoMessageID := h.showForestField(chatID, forest, field)
+
+	// Создаем сессию
+	session := &models.ForestSession{
+		PlayerID:       userID,
+		Resources:      field,
+		IsActive:       true,
+		IsChopping:     false,
+		StartedAt:      time.Now(),
+		FieldMessageID: fieldMessageID,
+		InfoMessageID:  infoMessageID,
+	}
+
+	h.forestSessions[userID] = session
+}
+
+func (h *BotHandlers) generateRandomForestField() [][]string {
+	// Создаем пустое поле 3x3
+	field := make([][]string, 3)
+	for i := range field {
+		field[i] = make([]string, 3)
+	}
+
+	// Доступные ресурсы для леса
+	availableResources := []string{"🌳"}
+
+	// Используем время для псевдослучайности
+	now := time.Now()
+	seed := now.UnixNano()
+
+	// Создаем список всех позиций
+	positions := [][2]int{
+		{0, 0}, {0, 1}, {0, 2},
+		{1, 0}, {1, 1}, {1, 2},
+		{2, 0}, {2, 1}, {2, 2},
+	}
+
+	// Перемешиваем позиции с использованием времени
+	for i := len(positions) - 1; i > 0; i-- {
+		j := int((seed + int64(i*13)) % int64(i+1))
+		positions[i], positions[j] = positions[j], positions[i]
+	}
+
+	// Размещаем 3 ресурса в первых 3 позициях
+	for i := 0; i < 3; i++ {
+		pos := positions[i]
+		// Выбираем ресурс псевдослучайно
+		resourceIndex := int((seed + int64(i*17) + int64(pos[0]*3) + int64(pos[1])) % int64(len(availableResources)))
+		resourceType := availableResources[resourceIndex]
+		field[pos[0]][pos[1]] = resourceType
+	}
+
+	return field
+}
+
+func (h *BotHandlers) showForestField(chatID int64, forest *models.Forest, field [][]string) (int, int) {
+	// Создаем инлайн клавиатуру на основе переданного поля
+	var keyboard [][]tgbotapi.InlineKeyboardButton
+	for i := 0; i < 3; i++ {
+		var row []tgbotapi.InlineKeyboardButton
+		for j := 0; j < 3; j++ {
+			cell := field[i][j]
+			var callbackData string
+
+			switch cell {
+			case "🌳":
+				callbackData = fmt.Sprintf("forest_birch_%d_%d", i, j)
+			default:
+				callbackData = fmt.Sprintf("forest_empty_%d_%d", i, j)
+				cell = " "
+			}
+
+			button := tgbotapi.NewInlineKeyboardButtonData(cell, callbackData)
+			row = append(row, button)
+		}
+		keyboard = append(keyboard, row)
+	}
+
+	// Сначала отправляем поле леса с инлайн кнопками
+	fieldMsg := tgbotapi.NewMessage(chatID, "Выберите дерево для рубки:")
+	fieldMsg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(keyboard...)
+	fieldResponse, _ := h.bot.Send(fieldMsg)
+
+	// Затем отправляем информационное сообщение с клавиатурой
+	// Вычисляем опыт до следующего уровня
+	expToNext := forest.Level*100 - forest.Experience
+
+	infoText := fmt.Sprintf(`🪓 Рубка (Уровень %d)
+До следующего уровня: %d опыта
+
+Доступные ресурсы:
+🌳 Береза`, forest.Level, expToNext)
+
+	forestKeyboard := tgbotapi.NewReplyKeyboard(
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton("◀️ Назад"),
+		),
+	)
+	forestKeyboard.ResizeKeyboard = true
+
+	infoMsg := tgbotapi.NewMessage(chatID, infoText)
+	infoMsg.ReplyMarkup = forestKeyboard
+	infoResponse, _ := h.bot.Send(infoMsg)
+
+	// Возвращаем ID поля и ID информационного сообщения
+	return fieldResponse.MessageID, infoResponse.MessageID
 }
 
 func (h *BotHandlers) handleForestGathering(message *tgbotapi.Message) {
@@ -813,6 +1006,17 @@ func (h *BotHandlers) handleCallbackQuery(callback *tgbotapi.CallbackQuery) {
 	} else if strings.HasPrefix(data, "mine_empty_") {
 		// Пустая ячейка
 		callbackConfig := tgbotapi.NewCallback(callback.ID, "Здесь нет ресурсов!")
+		h.bot.Request(callbackConfig)
+	} else if strings.HasPrefix(data, "forest_birch_") {
+		// Обрабатываем callback'и от леса
+		parts := strings.Split(data, "_")
+		if len(parts) == 4 {
+			row, col := parts[2], parts[3]
+			h.startChoppingAtPosition(userID, callback.Message.Chat.ID, "Береза", 10, callback.ID, row, col)
+		}
+	} else if strings.HasPrefix(data, "forest_empty_") {
+		// Пустая ячейка
+		callbackConfig := tgbotapi.NewCallback(callback.ID, "Здесь нет деревьев!")
 		h.bot.Request(callbackConfig)
 	} else {
 		// Остальные callback (крафт и т.д.)
@@ -1134,4 +1338,259 @@ func (h *BotHandlers) sendForestKeyboard(msg tgbotapi.MessageConfig) {
 	keyboard.ResizeKeyboard = true
 	msg.ReplyMarkup = keyboard
 	h.bot.Send(msg)
+}
+
+// Функции для рубки леса
+func (h *BotHandlers) startChoppingAtPosition(userID int64, chatID int64, resourceName string, duration int, callbackID string, rowStr, colStr string) {
+	row, _ := strconv.Atoi(rowStr)
+	col, _ := strconv.Atoi(colStr)
+
+	h.startChopping(userID, chatID, resourceName, duration, callbackID, row, col)
+}
+
+func (h *BotHandlers) startChopping(userID int64, chatID int64, resourceName string, duration int, callbackID string, row, col int) {
+	// Получаем игрока
+	player, err := h.db.GetPlayer(userID)
+	if err != nil {
+		log.Printf("Error getting player: %v", err)
+		return
+	}
+
+	// Проверяем наличие топора
+	hasTool, durability, err := h.db.HasToolInInventory(player.ID, "Простой топор")
+	if err != nil {
+		log.Printf("Error checking tool: %v", err)
+		return
+	}
+
+	if !hasTool {
+		msg := tgbotapi.NewMessage(chatID, `В инвентаре нет предмета "Простой топор".`)
+		h.bot.Send(msg)
+		callbackConfig := tgbotapi.NewCallback(callbackID, "")
+		h.bot.Request(callbackConfig)
+		return
+	}
+
+	// Отвечаем на callback
+	callbackConfig := tgbotapi.NewCallback(callbackID, "")
+	h.bot.Request(callbackConfig)
+
+	// Удаляем предыдущее сообщение о результате рубки, если оно существует
+	if session, exists := h.forestSessions[userID]; exists && session.ResultMessageID != 0 {
+		deleteResultMsg := tgbotapi.NewDeleteMessage(chatID, session.ResultMessageID)
+		h.bot.Request(deleteResultMsg)
+		session.ResultMessageID = 0 // Сбрасываем ID
+	}
+
+	// Отправляем сообщение о начале рубки
+	initialText := fmt.Sprintf(`Идет рубка дерева "%s". Время рубки %d сек.
+		
+%s 0%%`, resourceName, duration, h.createProgressBar(0, 10))
+
+	choppingMsg := tgbotapi.NewMessage(chatID, initialText)
+	sentMsg, _ := h.bot.Send(choppingMsg)
+
+	// Запускаем горутину для обновления прогресс бара
+	go h.updateChoppingProgress(userID, chatID, sentMsg.MessageID, resourceName, duration, durability, row, col)
+
+	// Создаем заглушку таймера
+	timer := time.NewTimer(time.Duration(duration) * time.Second)
+	h.choppingTimers[userID] = timer
+}
+
+func (h *BotHandlers) updateChoppingProgress(userID int64, chatID int64, messageID int, resourceName string, totalDuration int, durability int, row, col int) {
+	startTime := time.Now()
+
+	for {
+		elapsed := time.Since(startTime)
+		if elapsed >= time.Duration(totalDuration)*time.Second {
+			break
+		}
+
+		percentage := int((elapsed.Seconds() / float64(totalDuration)) * 100)
+		progressText := fmt.Sprintf(`Идет рубка дерева "%s". Время рубки %d сек.
+			
+%s %d%%`, resourceName, totalDuration, h.createProgressBar(percentage, 100), percentage)
+
+		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, progressText)
+		h.bot.Send(editMsg)
+
+		time.Sleep(1 * time.Second)
+	}
+
+	// После завершения показываем 100% и завершаем
+	finalText := fmt.Sprintf(`Идет рубка дерева "%s". Время рубки %d сек.
+		
+%s 100%%`, resourceName, totalDuration, h.createProgressBar(100, 100))
+
+	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, finalText)
+	h.bot.Send(editMsg)
+
+	// Завершаем рубку
+	h.completeChopping(userID, chatID, resourceName, durability, messageID, row, col)
+}
+
+func (h *BotHandlers) completeChopping(userID int64, chatID int64, resourceName string, oldDurability int, messageID int, row, col int) {
+	// Получаем игрока
+	player, err := h.db.GetPlayer(userID)
+	if err != nil {
+		log.Printf("Error getting player: %v", err)
+		return
+	}
+
+	// Добавляем ресурс в инвентарь
+	h.db.AddItemToInventory(player.ID, resourceName, 1)
+
+	// Обновляем прочность топора и сытость
+	h.db.UpdateItemDurability(player.ID, "Простой топор", 1)
+	h.db.UpdatePlayerSatiety(player.ID, -1)
+
+	// Добавляем опыт лесу и проверяем повышение уровня
+	levelUp, newLevel, err := h.db.UpdateForestExperience(player.ID, 2)
+	if err != nil {
+		log.Printf("Error updating forest experience: %v", err)
+		return
+	}
+
+	// Получаем обновленные данные
+	updatedPlayer, _ := h.db.GetPlayer(userID)
+	forest, _ := h.db.GetOrCreateForest(player.ID)
+
+	// Удаляем сообщение о рубке
+	deleteMsg := tgbotapi.NewDeleteMessage(chatID, messageID)
+	h.bot.Request(deleteMsg)
+
+	// Показываем результат
+	resultText := fmt.Sprintf(`✅ Ты срубил дерево "%s"!
+Получено опыта: 2
+Сытость: %d/100
+Прочность топора: %d/100
+До следующего уровня: %d опыта`,
+		resourceName,
+		updatedPlayer.Satiety,
+		oldDurability-1,
+		forest.Level*100-forest.Experience)
+
+	msg := tgbotapi.NewMessage(chatID, resultText)
+	resultResponse, _ := h.bot.Send(msg)
+
+	// Если уровень повысился, показываем сообщение о повышении
+	if levelUp {
+		levelUpText := fmt.Sprintf("🎉 Поздравляем! Уровень леса повышен до %d уровня!", newLevel)
+		levelUpMsg := tgbotapi.NewMessage(chatID, levelUpText)
+		h.bot.Send(levelUpMsg)
+	}
+
+	// Сохраняем ID сообщения с результатом в сессии
+	if session, exists := h.forestSessions[userID]; exists {
+		session.ResultMessageID = resultResponse.MessageID
+	}
+
+	// Убираем таймер
+	delete(h.choppingTimers, userID)
+
+	// Обновляем поле - убираем срубленное дерево
+	if session, exists := h.forestSessions[userID]; exists {
+		session.Resources[row][col] = ""
+
+		// Проверяем, остались ли ресурсы в поле
+		totalResources := 0
+		for i := 0; i < 3; i++ {
+			for j := 0; j < 3; j++ {
+				if session.Resources[i][j] != "" {
+					totalResources++
+				}
+			}
+		}
+
+		if totalResources > 0 {
+			// Обновляем инлайн клавиатуру с новым состоянием поля
+			h.updateForestField(chatID, forest, session.Resources, session.FieldMessageID)
+			// Обновляем информационное сообщение с актуальными данными
+			h.updateForestInfoMessage(userID, chatID, forest, session.InfoMessageID)
+		} else {
+			// Поле истощено, устанавливаем кулдаун
+			h.db.ExhaustForest(userID)
+
+			// Устанавливаем таймер кулдауна на 60 секунд
+			h.forestCooldowns[userID] = time.Now().Add(60 * time.Second)
+
+			// Удаляем сообщение с полем леса
+			deleteFieldMsg := tgbotapi.NewDeleteMessage(chatID, session.FieldMessageID)
+			h.bot.Request(deleteFieldMsg)
+
+			// Удаляем сообщение с информацией о лесе
+			deleteInfoMsg := tgbotapi.NewDeleteMessage(chatID, session.InfoMessageID)
+			h.bot.Request(deleteInfoMsg)
+
+			exhaustMsg := tgbotapi.NewMessage(chatID, `⚠️ Лес истощен! Необходимо подождать 1 минуту до восстановления деревьев.
+Нажми кнопку "🪓 Рубка" чтобы проверить готовность.`)
+			h.sendForestKeyboard(exhaustMsg)
+
+			// Удаляем сессию
+			delete(h.forestSessions, userID)
+		}
+	}
+}
+
+func (h *BotHandlers) updateForestField(chatID int64, forest *models.Forest, field [][]string, messageID int) {
+	text := "Выберите дерево для рубки:"
+
+	// Создаем инлайн клавиатуру на основе переданного поля
+	var keyboard [][]tgbotapi.InlineKeyboardButton
+	for i := 0; i < 3; i++ {
+		var row []tgbotapi.InlineKeyboardButton
+		for j := 0; j < 3; j++ {
+			cell := field[i][j]
+			var callbackData string
+
+			switch cell {
+			case "🌳":
+				callbackData = fmt.Sprintf("forest_birch_%d_%d", i, j)
+			default:
+				callbackData = fmt.Sprintf("forest_empty_%d_%d", i, j)
+				cell = " "
+			}
+
+			button := tgbotapi.NewInlineKeyboardButtonData(cell, callbackData)
+			row = append(row, button)
+		}
+		keyboard = append(keyboard, row)
+	}
+
+	// Редактируем существующее сообщение вместо отправки нового
+	editMsg := tgbotapi.NewEditMessageTextAndMarkup(chatID, messageID, text, tgbotapi.NewInlineKeyboardMarkup(keyboard...))
+	h.bot.Send(editMsg)
+}
+
+func (h *BotHandlers) updateForestInfoMessage(userID int64, chatID int64, forest *models.Forest, messageID int) {
+	// Вычисляем опыт до следующего уровня
+	expToNext := forest.Level*100 - forest.Experience
+
+	infoText := fmt.Sprintf(`🪓 Рубка (Уровень %d)
+До следующего уровня: %d опыта
+
+Доступные ресурсы:
+🌳 Береза`, forest.Level, expToNext)
+
+	// Удаляем старое сообщение
+	deleteMsg := tgbotapi.NewDeleteMessage(chatID, messageID)
+	h.bot.Request(deleteMsg)
+
+	// Создаем новое сообщение с клавиатурой
+	forestKeyboard := tgbotapi.NewReplyKeyboard(
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton("◀️ Назад"),
+		),
+	)
+	forestKeyboard.ResizeKeyboard = true
+
+	newMsg := tgbotapi.NewMessage(chatID, infoText)
+	newMsg.ReplyMarkup = forestKeyboard
+	newResponse, _ := h.bot.Send(newMsg)
+
+	// Обновляем ID сообщения в сессии
+	if session, exists := h.forestSessions[userID]; exists {
+		session.InfoMessageID = newResponse.MessageID
+	}
 }

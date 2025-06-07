@@ -70,6 +70,14 @@ func (db *DB) createTables() error {
 			last_used TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			is_exhausted BOOLEAN DEFAULT false
 		)`,
+		`CREATE TABLE IF NOT EXISTS forests (
+			id SERIAL PRIMARY KEY,
+			player_id INTEGER REFERENCES players(id),
+			level INTEGER DEFAULT 1,
+			experience INTEGER DEFAULT 0,
+			last_used TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			is_exhausted BOOLEAN DEFAULT false
+		)`,
 	}
 
 	for _, query := range queries {
@@ -103,6 +111,7 @@ func (db *DB) seedItems() error {
 		{"Кость", "material", 0},
 		{"Веревка", "material", 0},
 		{"Крючок", "material", 0},
+		{"Береза", "material", 0},
 	}
 
 	// Добавляем каждый предмет, если его нет
@@ -493,6 +502,85 @@ func (db *DB) HasToolInInventory(playerID int, toolName string) (bool, int, erro
 func (db *DB) ExhaustMine(playerID int64) error {
 	_, err := db.conn.Exec(`
 		UPDATE mines 
+		SET is_exhausted = true, last_used = CURRENT_TIMESTAMP
+		WHERE player_id = $1`,
+		playerID,
+	)
+	return err
+}
+
+func (db *DB) GetOrCreateForest(playerID int) (*models.Forest, error) {
+	var forest models.Forest
+
+	// Пытаемся найти существующий лес
+	err := db.conn.QueryRow(`
+		SELECT id, player_id, level, experience, last_used, is_exhausted 
+		FROM forests WHERE player_id = $1`, playerID,
+	).Scan(&forest.ID, &forest.PlayerID, &forest.Level, &forest.Experience, &forest.LastUsed, &forest.IsExhausted)
+
+	if err == sql.ErrNoRows {
+		// Создаем новый лес
+		err = db.conn.QueryRow(`
+			INSERT INTO forests (player_id, level, experience, is_exhausted) 
+			VALUES ($1, 1, 0, false) 
+			RETURNING id, player_id, level, experience, last_used, is_exhausted`,
+			playerID,
+		).Scan(&forest.ID, &forest.PlayerID, &forest.Level, &forest.Experience, &forest.LastUsed, &forest.IsExhausted)
+	}
+
+	return &forest, err
+}
+
+func (db *DB) UpdateForestExperience(playerID int, expGained int) (bool, int, error) {
+	// Получаем текущий уровень и опыт
+	var currentLevel, currentExp int
+	err := db.conn.QueryRow(`
+		SELECT level, experience 
+		FROM forests WHERE player_id = $1`,
+		playerID,
+	).Scan(&currentLevel, &currentExp)
+	if err != nil {
+		return false, 0, err
+	}
+
+	// Вычисляем новый опыт
+	newExp := currentExp + expGained
+
+	// Вычисляем новый уровень
+	newLevel := currentLevel
+	for newExp >= newLevel*100 {
+		newLevel++
+	}
+
+	// Обновляем данные в базе
+	_, err = db.conn.Exec(`
+		UPDATE forests 
+		SET experience = $1, level = $2
+		WHERE player_id = $3`,
+		newExp, newLevel, playerID,
+	)
+	if err != nil {
+		return false, 0, err
+	}
+
+	// Возвращаем информацию о повышении уровня
+	levelUp := newLevel > currentLevel
+	return levelUp, newLevel, nil
+}
+
+func (db *DB) SetForestExhausted(playerID int, exhausted bool) error {
+	_, err := db.conn.Exec(`
+		UPDATE forests 
+		SET is_exhausted = $1, last_used = CURRENT_TIMESTAMP
+		WHERE player_id = $2`,
+		exhausted, playerID,
+	)
+	return err
+}
+
+func (db *DB) ExhaustForest(playerID int64) error {
+	_, err := db.conn.Exec(`
+		UPDATE forests 
 		SET is_exhausted = true, last_used = CURRENT_TIMESTAMP
 		WHERE player_id = $1`,
 		playerID,
