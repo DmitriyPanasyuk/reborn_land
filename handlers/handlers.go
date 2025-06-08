@@ -98,6 +98,8 @@ func (h *BotHandlers) handleMessage(message *tgbotapi.Message) {
 		h.handleCreateKnife(message)
 	case "/create_fishing_rod":
 		h.handleCreateFishingRod(message)
+	case "/create_birch_plank":
+		h.handleCreateBirchPlank(message)
 	case "/eat":
 		h.handleEat(message)
 	case "🎯 Охота":
@@ -109,7 +111,7 @@ func (h *BotHandlers) handleMessage(message *tgbotapi.Message) {
 	default:
 		// Неизвестная команда
 		msg := tgbotapi.NewMessage(message.Chat.ID, "Неизвестная команда. Используйте /start для начала игры.")
-		h.bot.Send(msg)
+		h.sendMessage(msg)
 	}
 }
 
@@ -121,7 +123,7 @@ func (h *BotHandlers) handleStart(message *tgbotapi.Message) {
 	if err != nil {
 		log.Printf("Error checking player existence: %v", err)
 		msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка. Попробуйте позже.")
-		h.bot.Send(msg)
+		h.sendMessage(msg)
 		return
 	}
 
@@ -131,7 +133,7 @@ func (h *BotHandlers) handleStart(message *tgbotapi.Message) {
 		if err != nil {
 			log.Printf("Error getting player: %v", err)
 			msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка. Попробуйте позже.")
-			h.bot.Send(msg)
+			h.sendMessage(msg)
 			return
 		}
 
@@ -157,7 +159,7 @@ func (h *BotHandlers) startRegistration(message *tgbotapi.Message) {
 Всё — от костра до храмов — будет делом твоих рук.`
 
 	msg := tgbotapi.NewMessage(message.Chat.ID, welcomeText)
-	h.bot.Send(msg)
+	h.sendMessage(msg)
 
 	// Ждем 2 секунды и отправляем второе сообщение
 	go func() {
@@ -172,11 +174,11 @@ func (h *BotHandlers) startRegistration(message *tgbotapi.Message) {
 🔮🔮 Открытие древних артефактов`
 
 		msg2 := tgbotapi.NewMessage(message.Chat.ID, secondText)
-		h.bot.Send(msg2)
+		h.sendMessage(msg2)
 
 		// Сразу после второго сообщения просим имя
 		nameMsg := tgbotapi.NewMessage(message.Chat.ID, "Придумай себе имя:")
-		h.bot.Send(nameMsg)
+		h.sendMessage(nameMsg)
 
 		// Отмечаем, что ждем имя от этого пользователя
 		h.waitingForName[message.From.ID] = true
@@ -190,7 +192,7 @@ func (h *BotHandlers) handleNameInput(message *tgbotapi.Message) {
 	// Проверяем длину имени
 	if utf8.RuneCountInString(name) < 1 || utf8.RuneCountInString(name) > 30 {
 		msg := tgbotapi.NewMessage(message.Chat.ID, "Имя должно содержать от 1 до 30 символов. Попробуйте еще раз:")
-		h.bot.Send(msg)
+		h.sendMessage(msg)
 		return
 	}
 
@@ -199,7 +201,7 @@ func (h *BotHandlers) handleNameInput(message *tgbotapi.Message) {
 	if err != nil {
 		log.Printf("Error creating player: %v", err)
 		msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка при регистрации. Попробуйте позже.")
-		h.bot.Send(msg)
+		h.sendMessage(msg)
 		return
 	}
 
@@ -226,7 +228,7 @@ func (h *BotHandlers) handleProfile(message *tgbotapi.Message) {
 	if err != nil {
 		log.Printf("Error getting player: %v", err)
 		msg := tgbotapi.NewMessage(message.Chat.ID, "Сначала зарегистрируйтесь с помощью команды /start")
-		h.bot.Send(msg)
+		h.sendMessage(msg)
 		return
 	}
 
@@ -237,7 +239,7 @@ func (h *BotHandlers) handleProfile(message *tgbotapi.Message) {
 Сытость: %d/100`, player.Name, player.Level, player.Experience, player.Satiety)
 
 	msg := tgbotapi.NewMessage(message.Chat.ID, profileText)
-	h.bot.Send(msg)
+	h.sendMessage(msg)
 }
 
 func (h *BotHandlers) handleInventory(message *tgbotapi.Message) {
@@ -248,7 +250,7 @@ func (h *BotHandlers) handleInventory(message *tgbotapi.Message) {
 	if err != nil {
 		log.Printf("Error getting player: %v", err)
 		msg := tgbotapi.NewMessage(message.Chat.ID, "Сначала зарегистрируйтесь с помощью команды /start")
-		h.bot.Send(msg)
+		h.sendMessage(msg)
 		return
 	}
 
@@ -257,13 +259,13 @@ func (h *BotHandlers) handleInventory(message *tgbotapi.Message) {
 	if err != nil {
 		log.Printf("Error getting inventory: %v", err)
 		msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка при получении инвентаря.")
-		h.bot.Send(msg)
+		h.sendMessage(msg)
 		return
 	}
 
 	if len(inventory) == 0 {
 		msg := tgbotapi.NewMessage(message.Chat.ID, "🎒 Ваш инвентарь пуст.")
-		h.bot.Send(msg)
+		h.sendMessage(msg)
 		return
 	}
 
@@ -280,7 +282,7 @@ func (h *BotHandlers) handleInventory(message *tgbotapi.Message) {
 	}
 
 	msg := tgbotapi.NewMessage(message.Chat.ID, inventoryText)
-	h.bot.Send(msg)
+	h.sendMessage(msg)
 }
 
 func (h *BotHandlers) handleEat(message *tgbotapi.Message) {
@@ -291,7 +293,7 @@ func (h *BotHandlers) handleEat(message *tgbotapi.Message) {
 	if err != nil {
 		log.Printf("Error getting player: %v", err)
 		msg := tgbotapi.NewMessage(message.Chat.ID, "Сначала зарегистрируйтесь с помощью команды /start")
-		h.bot.Send(msg)
+		h.sendMessage(msg)
 		return
 	}
 
@@ -300,7 +302,7 @@ func (h *BotHandlers) handleEat(message *tgbotapi.Message) {
 	if err != nil {
 		log.Printf("Error getting inventory: %v", err)
 		msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка при получении инвентаря.")
-		h.bot.Send(msg)
+		h.sendMessage(msg)
 		return
 	}
 
@@ -315,7 +317,7 @@ func (h *BotHandlers) handleEat(message *tgbotapi.Message) {
 
 	if berryItem == nil {
 		msg := tgbotapi.NewMessage(message.Chat.ID, "У вас нет ягод для употребления.")
-		h.bot.Send(msg)
+		h.sendMessage(msg)
 		return
 	}
 
@@ -324,7 +326,7 @@ func (h *BotHandlers) handleEat(message *tgbotapi.Message) {
 	if err != nil {
 		log.Printf("Error consuming berry: %v", err)
 		msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка при употреблении ягоды.")
-		h.bot.Send(msg)
+		h.sendMessage(msg)
 		return
 	}
 
@@ -336,7 +338,7 @@ func (h *BotHandlers) handleEat(message *tgbotapi.Message) {
 	if err != nil {
 		log.Printf("Error updating satiety: %v", err)
 		msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка при обновлении сытости.")
-		h.bot.Send(msg)
+		h.sendMessage(msg)
 		return
 	}
 
@@ -345,7 +347,7 @@ func (h *BotHandlers) handleEat(message *tgbotapi.Message) {
 	if err != nil {
 		log.Printf("Error getting updated player: %v", err)
 		msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка при получении обновленных данных.")
-		h.bot.Send(msg)
+		h.sendMessage(msg)
 		return
 	}
 
@@ -355,7 +357,7 @@ func (h *BotHandlers) handleEat(message *tgbotapi.Message) {
 	// Отправляем сообщение об успешном употреблении
 	responseText := fmt.Sprintf("Съеден предмет \"Ягода\", сытость пополнена на %d ед.\nСытость: %d/100", actualSatietyGain, updatedPlayer.Satiety)
 	msg := tgbotapi.NewMessage(message.Chat.ID, responseText)
-	h.bot.Send(msg)
+	h.sendMessage(msg)
 }
 
 func (h *BotHandlers) handleGathering(message *tgbotapi.Message) {
@@ -384,6 +386,7 @@ func (h *BotHandlers) handleWorkplace(message *tgbotapi.Message) {
 func (h *BotHandlers) handleWorkbench(message *tgbotapi.Message) {
 	workbenchText := `🛠 Доступные предметы для создания:
 
+Березовый брус — /create_birch_plank
 Простой топор — /create_axe
 Простая кирка — /create_pickaxe
 Простой лук — /create_bow
@@ -392,17 +395,17 @@ func (h *BotHandlers) handleWorkbench(message *tgbotapi.Message) {
 Простая удочка — /create_fishing_rod`
 
 	msg := tgbotapi.NewMessage(message.Chat.ID, workbenchText)
-	h.bot.Send(msg)
+	h.sendMessage(msg)
 }
 
 func (h *BotHandlers) handleFurnace(message *tgbotapi.Message) {
 	msg := tgbotapi.NewMessage(message.Chat.ID, "🧱 Функция печи пока в разработке...")
-	h.bot.Send(msg)
+	h.sendMessage(msg)
 }
 
 func (h *BotHandlers) handleCampfire(message *tgbotapi.Message) {
 	msg := tgbotapi.NewMessage(message.Chat.ID, "🔥 Функция костра пока в разработке...")
-	h.bot.Send(msg)
+	h.sendMessage(msg)
 }
 
 func (h *BotHandlers) handleBack(message *tgbotapi.Message) {
@@ -413,14 +416,14 @@ func (h *BotHandlers) handleBack(message *tgbotapi.Message) {
 	if _, isMining := h.miningTimers[userID]; isMining {
 		// Если идет добыча, не позволяем выйти
 		msg := tgbotapi.NewMessage(chatID, "Идет добыча ресурса.")
-		h.bot.Send(msg)
+		h.sendMessage(msg)
 		return
 	}
 
 	if _, isChopping := h.choppingTimers[userID]; isChopping {
 		// Если идет рубка, не позволяем выйти
 		msg := tgbotapi.NewMessage(chatID, "Идет рубка дерева.")
-		h.bot.Send(msg)
+		h.sendMessage(msg)
 		return
 	}
 
@@ -428,11 +431,11 @@ func (h *BotHandlers) handleBack(message *tgbotapi.Message) {
 	if session, exists := h.mineSessions[userID]; exists {
 		// Удаляем сообщение с полем шахты
 		deleteFieldMsg := tgbotapi.NewDeleteMessage(chatID, session.FieldMessageID)
-		h.bot.Request(deleteFieldMsg)
+		h.requestAPI(deleteFieldMsg)
 
 		// Удаляем сообщение с информацией о шахте
 		deleteInfoMsg := tgbotapi.NewDeleteMessage(chatID, session.InfoMessageID)
-		h.bot.Request(deleteInfoMsg)
+		h.requestAPI(deleteInfoMsg)
 
 		// Удаляем сессию шахты
 		delete(h.mineSessions, userID)
@@ -447,11 +450,11 @@ func (h *BotHandlers) handleBack(message *tgbotapi.Message) {
 	if session, exists := h.forestSessions[userID]; exists {
 		// Удаляем сообщение с полем леса
 		deleteFieldMsg := tgbotapi.NewDeleteMessage(chatID, session.FieldMessageID)
-		h.bot.Request(deleteFieldMsg)
+		h.requestAPI(deleteFieldMsg)
 
 		// Удаляем сообщение с информацией о лесе
 		deleteInfoMsg := tgbotapi.NewDeleteMessage(chatID, session.InfoMessageID)
-		h.bot.Request(deleteInfoMsg)
+		h.requestAPI(deleteInfoMsg)
 
 		// Удаляем сессию леса
 		delete(h.forestSessions, userID)
@@ -485,7 +488,7 @@ func (h *BotHandlers) handleMine(message *tgbotapi.Message) {
 			remainingTime := time.Until(cooldownEnd)
 			msg := tgbotapi.NewMessage(message.Chat.ID,
 				fmt.Sprintf("До обновления шахты осталось %d сек.", int(remainingTime.Seconds())))
-			h.bot.Send(msg)
+			h.sendMessage(msg)
 			return
 		} else {
 			// Кулдаун истек, удаляем его
@@ -498,14 +501,14 @@ func (h *BotHandlers) handleMine(message *tgbotapi.Message) {
 	if err != nil {
 		log.Printf("Error getting player: %v", err)
 		msg := tgbotapi.NewMessage(message.Chat.ID, "Сначала зарегистрируйтесь с помощью команды /start")
-		h.bot.Send(msg)
+		h.sendMessage(msg)
 		return
 	}
 
 	// Проверяем сытость игрока
 	if player.Satiety <= 0 {
 		msg := tgbotapi.NewMessage(message.Chat.ID, "Сытость 0. Необходимо поесть.")
-		h.bot.Send(msg)
+		h.sendMessage(msg)
 		return
 	}
 
@@ -514,13 +517,15 @@ func (h *BotHandlers) handleMine(message *tgbotapi.Message) {
 	if err != nil {
 		log.Printf("Error getting mine: %v", err)
 		msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка при работе с шахтой.")
-		h.bot.Send(msg)
+		h.sendMessage(msg)
 		return
 	}
 
 	// Если шахта была истощена в базе данных, восстанавливаем её
 	if mine.IsExhausted {
-		h.db.SetMineExhausted(player.ID, false)
+		if err := h.db.SetMineExhausted(player.ID, false); err != nil {
+			log.Printf("Error setting mine exhausted: %v", err)
+		}
 		mine.IsExhausted = false
 	}
 
@@ -577,7 +582,7 @@ func (h *BotHandlers) showMineField(chatID int64, mine *models.Mine, field [][]s
 	// Сначала отправляем поле шахты с инлайн кнопками
 	fieldMsg := tgbotapi.NewMessage(chatID, "Выберите ресурс для добычи:")
 	fieldMsg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(keyboard...)
-	fieldResponse, _ := h.bot.Send(fieldMsg)
+	fieldResponse, _ := h.sendChattableWithResponse(fieldMsg)
 
 	// Затем отправляем информационное сообщение с клавиатурой
 	// Вычисляем опыт до следующего уровня
@@ -599,7 +604,7 @@ func (h *BotHandlers) showMineField(chatID int64, mine *models.Mine, field [][]s
 
 	infoMsg := tgbotapi.NewMessage(chatID, infoText)
 	infoMsg.ReplyMarkup = mineKeyboard
-	infoResponse, _ := h.bot.Send(infoMsg)
+	infoResponse, _ := h.sendChattableWithResponse(infoMsg)
 
 	// Возвращаем ID поля и ID информационного сообщения
 	return fieldResponse.MessageID, infoResponse.MessageID
@@ -691,7 +696,7 @@ func (h *BotHandlers) updateMiningProgress(userID int64, chatID int64, messageID
 
 			// Редактируем сообщение
 			editMsg := tgbotapi.NewEditMessageText(chatID, messageID, newText)
-			h.bot.Send(editMsg)
+			h.editMessage(editMsg)
 
 		case <-time.After(time.Duration(totalDuration+1) * time.Second):
 			// Таймаут на случай, если что-то пошло не так
@@ -702,12 +707,12 @@ func (h *BotHandlers) updateMiningProgress(userID int64, chatID int64, messageID
 
 func (h *BotHandlers) handleField(message *tgbotapi.Message) {
 	msg := tgbotapi.NewMessage(message.Chat.ID, "🌾 Функция поля пока в разработке...")
-	h.bot.Send(msg)
+	h.sendMessage(msg)
 }
 
 func (h *BotHandlers) handleLake(message *tgbotapi.Message) {
 	msg := tgbotapi.NewMessage(message.Chat.ID, "🎣 Функция озера пока в разработке...")
-	h.bot.Send(msg)
+	h.sendMessage(msg)
 }
 
 func (h *BotHandlers) handleForest(message *tgbotapi.Message) {
@@ -729,7 +734,7 @@ func (h *BotHandlers) handleForest(message *tgbotapi.Message) {
 
 func (h *BotHandlers) handleHunting(message *tgbotapi.Message) {
 	msg := tgbotapi.NewMessage(message.Chat.ID, "🎯 Функция охоты пока в разработке...")
-	h.bot.Send(msg)
+	h.sendMessage(msg)
 }
 
 func (h *BotHandlers) handleChopping(message *tgbotapi.Message) {
@@ -742,7 +747,7 @@ func (h *BotHandlers) handleChopping(message *tgbotapi.Message) {
 			remainingTime := time.Until(cooldownEnd)
 			msg := tgbotapi.NewMessage(message.Chat.ID,
 				fmt.Sprintf("До обновления леса осталось %d сек.", int(remainingTime.Seconds())))
-			h.bot.Send(msg)
+			h.sendMessage(msg)
 			return
 		} else {
 			// Кулдаун истек, удаляем его
@@ -755,14 +760,14 @@ func (h *BotHandlers) handleChopping(message *tgbotapi.Message) {
 	if err != nil {
 		log.Printf("Error getting player: %v", err)
 		msg := tgbotapi.NewMessage(message.Chat.ID, "Сначала зарегистрируйтесь с помощью команды /start")
-		h.bot.Send(msg)
+		h.sendMessage(msg)
 		return
 	}
 
 	// Проверяем сытость игрока
 	if player.Satiety <= 0 {
 		msg := tgbotapi.NewMessage(message.Chat.ID, "Сытость 0. Необходимо поесть.")
-		h.bot.Send(msg)
+		h.sendMessage(msg)
 		return
 	}
 
@@ -771,13 +776,15 @@ func (h *BotHandlers) handleChopping(message *tgbotapi.Message) {
 	if err != nil {
 		log.Printf("Error getting forest: %v", err)
 		msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка при работе с лесом.")
-		h.bot.Send(msg)
+		h.sendMessage(msg)
 		return
 	}
 
 	// Если лес был истощен в базе данных, восстанавливаем его
 	if forest.IsExhausted {
-		h.db.SetForestExhausted(player.ID, false)
+		if err := h.db.SetForestExhausted(player.ID, false); err != nil {
+			log.Printf("Error setting forest exhausted: %v", err)
+		}
 		forest.IsExhausted = false
 	}
 
@@ -871,7 +878,7 @@ func (h *BotHandlers) showForestField(chatID int64, forest *models.Forest, field
 	// Сначала отправляем поле леса с инлайн кнопками
 	fieldMsg := tgbotapi.NewMessage(chatID, "Выберите дерево для рубки:")
 	fieldMsg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(keyboard...)
-	fieldResponse, _ := h.bot.Send(fieldMsg)
+	fieldResponse, _ := h.sendChattableWithResponse(fieldMsg)
 
 	// Затем отправляем информационное сообщение с клавиатурой
 	// Вычисляем опыт до следующего уровня
@@ -892,7 +899,7 @@ func (h *BotHandlers) showForestField(chatID int64, forest *models.Forest, field
 
 	infoMsg := tgbotapi.NewMessage(chatID, infoText)
 	infoMsg.ReplyMarkup = forestKeyboard
-	infoResponse, _ := h.bot.Send(infoMsg)
+	infoResponse, _ := h.sendChattableWithResponse(infoMsg)
 
 	// Возвращаем ID поля и ID информационного сообщения
 	return fieldResponse.MessageID, infoResponse.MessageID
@@ -900,7 +907,7 @@ func (h *BotHandlers) showForestField(chatID int64, forest *models.Forest, field
 
 func (h *BotHandlers) handleForestGathering(message *tgbotapi.Message) {
 	msg := tgbotapi.NewMessage(message.Chat.ID, "🌿 Функция сбора растений пока в разработке...")
-	h.bot.Send(msg)
+	h.sendMessage(msg)
 }
 
 func (h *BotHandlers) handleCreateAxe(message *tgbotapi.Message) {
@@ -927,6 +934,10 @@ func (h *BotHandlers) handleCreateFishingRod(message *tgbotapi.Message) {
 	h.showRecipe(message, "Простая удочка")
 }
 
+func (h *BotHandlers) handleCreateBirchPlank(message *tgbotapi.Message) {
+	h.showRecipe(message, "Березовый брус")
+}
+
 func (h *BotHandlers) showRecipe(message *tgbotapi.Message, itemName string) {
 	userID := message.From.ID
 
@@ -935,7 +946,7 @@ func (h *BotHandlers) showRecipe(message *tgbotapi.Message, itemName string) {
 	if err != nil {
 		log.Printf("Error getting player: %v", err)
 		msg := tgbotapi.NewMessage(message.Chat.ID, "Сначала зарегистрируйтесь с помощью команды /start")
-		h.bot.Send(msg)
+		h.sendMessage(msg)
 		return
 	}
 
@@ -944,7 +955,7 @@ func (h *BotHandlers) showRecipe(message *tgbotapi.Message, itemName string) {
 	if err != nil {
 		log.Printf("Error getting recipe: %v", err)
 		msg := tgbotapi.NewMessage(message.Chat.ID, "Ошибка получения рецепта.")
-		h.bot.Send(msg)
+		h.sendMessage(msg)
 		return
 	}
 
@@ -983,7 +994,7 @@ func (h *BotHandlers) showRecipe(message *tgbotapi.Message, itemName string) {
 		),
 	)
 	msg.ReplyMarkup = keyboard
-	h.bot.Send(msg)
+	h.sendMessage(msg)
 }
 
 func (h *BotHandlers) handleCallbackQuery(callback *tgbotapi.CallbackQuery) {
@@ -1006,7 +1017,7 @@ func (h *BotHandlers) handleCallbackQuery(callback *tgbotapi.CallbackQuery) {
 	} else if strings.HasPrefix(data, "mine_empty_") {
 		// Пустая ячейка
 		callbackConfig := tgbotapi.NewCallback(callback.ID, "Здесь нет ресурсов!")
-		h.bot.Request(callbackConfig)
+		h.requestAPI(callbackConfig)
 	} else if strings.HasPrefix(data, "forest_birch_") {
 		// Обрабатываем callback'и от леса
 		parts := strings.Split(data, "_")
@@ -1017,13 +1028,13 @@ func (h *BotHandlers) handleCallbackQuery(callback *tgbotapi.CallbackQuery) {
 	} else if strings.HasPrefix(data, "forest_empty_") {
 		// Пустая ячейка
 		callbackConfig := tgbotapi.NewCallback(callback.ID, "Здесь нет деревьев!")
-		h.bot.Request(callbackConfig)
+		h.requestAPI(callbackConfig)
 	} else {
 		// Остальные callback (крафт и т.д.)
 		msg := tgbotapi.NewMessage(callback.Message.Chat.ID, "🔨 Функция создания предметов пока в разработке...")
-		h.bot.Send(msg)
+		h.sendMessage(msg)
 		callbackConfig := tgbotapi.NewCallback(callback.ID, "")
-		h.bot.Request(callbackConfig)
+		h.requestAPI(callbackConfig)
 	}
 }
 
@@ -1051,20 +1062,20 @@ func (h *BotHandlers) startMining(userID int64, chatID int64, resourceName strin
 
 	if !hasTool {
 		msg := tgbotapi.NewMessage(chatID, `В инвентаре нет предмета "Простая кирка".`)
-		h.bot.Send(msg)
+		h.sendMessage(msg)
 		callbackConfig := tgbotapi.NewCallback(callbackID, "")
-		h.bot.Request(callbackConfig)
+		h.requestAPI(callbackConfig)
 		return
 	}
 
 	// Отвечаем на callback
 	callbackConfig := tgbotapi.NewCallback(callbackID, "")
-	h.bot.Request(callbackConfig)
+	h.requestAPI(callbackConfig)
 
 	// Удаляем предыдущее сообщение о результате добычи, если оно существует
 	if session, exists := h.mineSessions[userID]; exists && session.ResultMessageID != 0 {
 		deleteResultMsg := tgbotapi.NewDeleteMessage(chatID, session.ResultMessageID)
-		h.bot.Request(deleteResultMsg)
+		h.requestAPI(deleteResultMsg)
 		session.ResultMessageID = 0 // Сбрасываем ID
 	}
 
@@ -1074,7 +1085,7 @@ func (h *BotHandlers) startMining(userID int64, chatID int64, resourceName strin
 %s 0%%`, resourceName, duration, h.createProgressBar(0, 10))
 
 	miningMsg := tgbotapi.NewMessage(chatID, initialText)
-	sentMsg, _ := h.bot.Send(miningMsg)
+	sentMsg, _ := h.sendMessageWithResponse(miningMsg)
 
 	// Запускаем горутину для обновления прогресс бара
 	go h.updateMiningProgress(userID, chatID, sentMsg.MessageID, resourceName, duration, durability, row, col)
@@ -1093,11 +1104,17 @@ func (h *BotHandlers) completeMining(userID int64, chatID int64, resourceName st
 	}
 
 	// Добавляем ресурс в инвентарь
-	h.db.AddItemToInventory(player.ID, resourceName, 1)
+	if err := h.db.AddItemToInventory(player.ID, resourceName, 1); err != nil {
+		log.Printf("Error adding item to inventory: %v", err)
+	}
 
 	// Обновляем прочность кирки и сытость (при добыче игрок тратит энергию)
-	h.db.UpdateItemDurability(player.ID, "Простая кирка", 1)
-	h.db.UpdatePlayerSatiety(player.ID, -1)
+	if err := h.db.UpdateItemDurability(player.ID, "Простая кирка", 1); err != nil {
+		log.Printf("Error updating item durability: %v", err)
+	}
+	if err := h.db.UpdatePlayerSatiety(player.ID, -1); err != nil {
+		log.Printf("Error updating player satiety: %v", err)
+	}
 
 	// Добавляем опыт шахте и проверяем повышение уровня
 	levelUp, newLevel, err := h.db.UpdateMineExperience(player.ID, 2)
@@ -1112,7 +1129,7 @@ func (h *BotHandlers) completeMining(userID int64, chatID int64, resourceName st
 
 	// Удаляем сообщение о добыче
 	deleteMsg := tgbotapi.NewDeleteMessage(chatID, messageID)
-	h.bot.Request(deleteMsg)
+	h.requestAPI(deleteMsg)
 
 	// Показываем результат
 	resultText := fmt.Sprintf(`✅ Ты добыл %s!
@@ -1126,13 +1143,13 @@ func (h *BotHandlers) completeMining(userID int64, chatID int64, resourceName st
 		mine.Level*100-mine.Experience)
 
 	msg := tgbotapi.NewMessage(chatID, resultText)
-	resultResponse, _ := h.bot.Send(msg)
+	resultResponse, _ := h.sendMessageWithResponse(msg)
 
 	// Если уровень повысился, показываем сообщение о повышении
 	if levelUp {
 		levelUpText := fmt.Sprintf("🎉 Поздравляем! Уровень шахты повышен до %d уровня!", newLevel)
 		levelUpMsg := tgbotapi.NewMessage(chatID, levelUpText)
-		h.bot.Send(levelUpMsg)
+		h.sendMessage(levelUpMsg)
 	}
 
 	// Сохраняем ID сообщения с результатом в сессии
@@ -1161,23 +1178,25 @@ func (h *BotHandlers) completeMining(userID int64, chatID int64, resourceName st
 
 		if totalResources > 0 {
 			// Обновляем инлайн клавиатуру с новым состоянием поля
-			h.updateMineField(chatID, mine, session.Resources, session.FieldMessageID)
+			h.updateMineField(chatID, session.Resources, session.FieldMessageID)
 			// Обновляем информационное сообщение с актуальными данными
 			h.updateMineInfoMessage(userID, chatID, mine, session.InfoMessageID)
 		} else {
 			// Поле истощено, устанавливаем кулдаун
-			h.db.ExhaustMine(userID)
+			if err := h.db.ExhaustMine(userID); err != nil {
+				log.Printf("Error exhausting mine: %v", err)
+			}
 
 			// Устанавливаем таймер кулдауна на 60 секунд
 			h.mineCooldowns[userID] = time.Now().Add(60 * time.Second)
 
 			// Удаляем сообщение с полем шахты
 			deleteFieldMsg := tgbotapi.NewDeleteMessage(chatID, session.FieldMessageID)
-			h.bot.Request(deleteFieldMsg)
+			h.requestAPI(deleteFieldMsg)
 
 			// Удаляем сообщение с информацией о шахте
 			deleteInfoMsg := tgbotapi.NewDeleteMessage(chatID, session.InfoMessageID)
-			h.bot.Request(deleteInfoMsg)
+			h.requestAPI(deleteInfoMsg)
 
 			exhaustMsg := tgbotapi.NewMessage(chatID, `⚠️ Шахта истощена! Необходимо подождать 1 минуту до восстановления ресурсов.
 Нажми кнопку "⛏ Шахта" чтобы проверить готовность.`)
@@ -1189,7 +1208,7 @@ func (h *BotHandlers) completeMining(userID int64, chatID int64, resourceName st
 	}
 }
 
-func (h *BotHandlers) updateMineField(chatID int64, mine *models.Mine, field [][]string, messageID int) {
+func (h *BotHandlers) updateMineField(chatID int64, field [][]string, messageID int) {
 	text := "Выберите ресурс для добычи:"
 
 	// Создаем инлайн клавиатуру на основе переданного поля
@@ -1218,7 +1237,7 @@ func (h *BotHandlers) updateMineField(chatID int64, mine *models.Mine, field [][
 
 	// Редактируем существующее сообщение вместо отправки нового
 	editMsg := tgbotapi.NewEditMessageTextAndMarkup(chatID, messageID, text, tgbotapi.NewInlineKeyboardMarkup(keyboard...))
-	h.bot.Send(editMsg)
+	h.editMessage(editMsg)
 }
 
 func (h *BotHandlers) updateMineInfoMessage(userID int64, chatID int64, mine *models.Mine, messageID int) {
@@ -1234,7 +1253,7 @@ func (h *BotHandlers) updateMineInfoMessage(userID int64, chatID int64, mine *mo
 
 	// Удаляем старое сообщение
 	deleteMsg := tgbotapi.NewDeleteMessage(chatID, messageID)
-	h.bot.Request(deleteMsg)
+	h.requestAPI(deleteMsg)
 
 	// Создаем новое сообщение с клавиатурой
 	mineKeyboard := tgbotapi.NewReplyKeyboard(
@@ -1246,7 +1265,7 @@ func (h *BotHandlers) updateMineInfoMessage(userID int64, chatID int64, mine *mo
 
 	newMsg := tgbotapi.NewMessage(chatID, infoText)
 	newMsg.ReplyMarkup = mineKeyboard
-	newResponse, _ := h.bot.Send(newMsg)
+	newResponse, _ := h.sendMessageWithResponse(newMsg)
 
 	// Обновляем ID сообщения в сессии
 	if session, exists := h.mineSessions[userID]; exists {
@@ -1267,7 +1286,7 @@ func (h *BotHandlers) sendWithKeyboard(msg tgbotapi.MessageConfig) {
 	)
 	keyboard.ResizeKeyboard = true
 	msg.ReplyMarkup = keyboard
-	h.bot.Send(msg)
+	h.sendMessage(msg)
 }
 
 func (h *BotHandlers) sendWorkplaceKeyboard(msg tgbotapi.MessageConfig) {
@@ -1286,7 +1305,7 @@ func (h *BotHandlers) sendWorkplaceKeyboard(msg tgbotapi.MessageConfig) {
 	)
 	keyboard.ResizeKeyboard = true
 	msg.ReplyMarkup = keyboard
-	h.bot.Send(msg)
+	h.sendMessage(msg)
 }
 
 func (h *BotHandlers) sendMineKeyboard(msg tgbotapi.MessageConfig) {
@@ -1298,7 +1317,7 @@ func (h *BotHandlers) sendMineKeyboard(msg tgbotapi.MessageConfig) {
 	)
 	keyboard.ResizeKeyboard = true
 	msg.ReplyMarkup = keyboard
-	h.bot.Send(msg)
+	h.sendMessage(msg)
 }
 
 func (h *BotHandlers) sendGatheringKeyboard(msg tgbotapi.MessageConfig) {
@@ -1318,7 +1337,7 @@ func (h *BotHandlers) sendGatheringKeyboard(msg tgbotapi.MessageConfig) {
 	)
 	keyboard.ResizeKeyboard = true
 	msg.ReplyMarkup = keyboard
-	h.bot.Send(msg)
+	h.sendMessage(msg)
 }
 
 func (h *BotHandlers) sendForestKeyboard(msg tgbotapi.MessageConfig) {
@@ -1337,7 +1356,46 @@ func (h *BotHandlers) sendForestKeyboard(msg tgbotapi.MessageConfig) {
 	)
 	keyboard.ResizeKeyboard = true
 	msg.ReplyMarkup = keyboard
-	h.bot.Send(msg)
+	h.sendMessage(msg)
+}
+
+// Вспомогательная функция для отправки сообщений с обработкой ошибок
+func (h *BotHandlers) sendMessage(msg tgbotapi.MessageConfig) {
+	if _, err := h.bot.Send(msg); err != nil {
+		log.Printf("Failed to send message: %v", err)
+	}
+}
+
+// Вспомогательная функция для отправки сообщений с возвратом результата
+func (h *BotHandlers) sendMessageWithResponse(msg tgbotapi.MessageConfig) (tgbotapi.Message, error) {
+	response, err := h.bot.Send(msg)
+	if err != nil {
+		log.Printf("Failed to send message: %v", err)
+	}
+	return response, err
+}
+
+// Вспомогательная функция для редактирования сообщений с обработкой ошибок
+func (h *BotHandlers) editMessage(editMsg tgbotapi.Chattable) {
+	if _, err := h.bot.Send(editMsg); err != nil {
+		log.Printf("Failed to edit message: %v", err)
+	}
+}
+
+// Вспомогательная функция для отправки любого Chattable с возвратом результата
+func (h *BotHandlers) sendChattableWithResponse(c tgbotapi.Chattable) (tgbotapi.Message, error) {
+	response, err := h.bot.Send(c)
+	if err != nil {
+		log.Printf("Failed to send chattable: %v", err)
+	}
+	return response, err
+}
+
+// Вспомогательная функция для отправки запросов к Telegram API с обработкой ошибок
+func (h *BotHandlers) requestAPI(c tgbotapi.Chattable) {
+	if _, err := h.bot.Request(c); err != nil {
+		log.Printf("Failed to send API request: %v", err)
+	}
 }
 
 // Функции для рубки леса
@@ -1365,20 +1423,20 @@ func (h *BotHandlers) startChopping(userID int64, chatID int64, resourceName str
 
 	if !hasTool {
 		msg := tgbotapi.NewMessage(chatID, `В инвентаре нет предмета "Простой топор".`)
-		h.bot.Send(msg)
+		h.sendMessage(msg)
 		callbackConfig := tgbotapi.NewCallback(callbackID, "")
-		h.bot.Request(callbackConfig)
+		h.requestAPI(callbackConfig)
 		return
 	}
 
 	// Отвечаем на callback
 	callbackConfig := tgbotapi.NewCallback(callbackID, "")
-	h.bot.Request(callbackConfig)
+	h.requestAPI(callbackConfig)
 
 	// Удаляем предыдущее сообщение о результате рубки, если оно существует
 	if session, exists := h.forestSessions[userID]; exists && session.ResultMessageID != 0 {
 		deleteResultMsg := tgbotapi.NewDeleteMessage(chatID, session.ResultMessageID)
-		h.bot.Request(deleteResultMsg)
+		h.requestAPI(deleteResultMsg)
 		session.ResultMessageID = 0 // Сбрасываем ID
 	}
 
@@ -1388,7 +1446,7 @@ func (h *BotHandlers) startChopping(userID int64, chatID int64, resourceName str
 %s 0%%`, resourceName, duration, h.createProgressBar(0, 10))
 
 	choppingMsg := tgbotapi.NewMessage(chatID, initialText)
-	sentMsg, _ := h.bot.Send(choppingMsg)
+	sentMsg, _ := h.sendMessageWithResponse(choppingMsg)
 
 	// Запускаем горутину для обновления прогресс бара
 	go h.updateChoppingProgress(userID, chatID, sentMsg.MessageID, resourceName, duration, durability, row, col)
@@ -1413,7 +1471,7 @@ func (h *BotHandlers) updateChoppingProgress(userID int64, chatID int64, message
 %s %d%%`, resourceName, totalDuration, h.createProgressBar(percentage, 100), percentage)
 
 		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, progressText)
-		h.bot.Send(editMsg)
+		h.editMessage(editMsg)
 
 		time.Sleep(1 * time.Second)
 	}
@@ -1424,7 +1482,7 @@ func (h *BotHandlers) updateChoppingProgress(userID int64, chatID int64, message
 %s 100%%`, resourceName, totalDuration, h.createProgressBar(100, 100))
 
 	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, finalText)
-	h.bot.Send(editMsg)
+	h.editMessage(editMsg)
 
 	// Завершаем рубку
 	h.completeChopping(userID, chatID, resourceName, durability, messageID, row, col)
@@ -1439,11 +1497,17 @@ func (h *BotHandlers) completeChopping(userID int64, chatID int64, resourceName 
 	}
 
 	// Добавляем ресурс в инвентарь
-	h.db.AddItemToInventory(player.ID, resourceName, 1)
+	if err := h.db.AddItemToInventory(player.ID, resourceName, 1); err != nil {
+		log.Printf("Error adding item to inventory: %v", err)
+	}
 
 	// Обновляем прочность топора и сытость
-	h.db.UpdateItemDurability(player.ID, "Простой топор", 1)
-	h.db.UpdatePlayerSatiety(player.ID, -1)
+	if err := h.db.UpdateItemDurability(player.ID, "Простой топор", 1); err != nil {
+		log.Printf("Error updating item durability: %v", err)
+	}
+	if err := h.db.UpdatePlayerSatiety(player.ID, -1); err != nil {
+		log.Printf("Error updating player satiety: %v", err)
+	}
 
 	// Добавляем опыт лесу и проверяем повышение уровня
 	levelUp, newLevel, err := h.db.UpdateForestExperience(player.ID, 2)
@@ -1458,7 +1522,7 @@ func (h *BotHandlers) completeChopping(userID int64, chatID int64, resourceName 
 
 	// Удаляем сообщение о рубке
 	deleteMsg := tgbotapi.NewDeleteMessage(chatID, messageID)
-	h.bot.Request(deleteMsg)
+	h.requestAPI(deleteMsg)
 
 	// Показываем результат
 	resultText := fmt.Sprintf(`✅ Ты срубил дерево "%s"!
@@ -1472,13 +1536,13 @@ func (h *BotHandlers) completeChopping(userID int64, chatID int64, resourceName 
 		forest.Level*100-forest.Experience)
 
 	msg := tgbotapi.NewMessage(chatID, resultText)
-	resultResponse, _ := h.bot.Send(msg)
+	resultResponse, _ := h.sendMessageWithResponse(msg)
 
 	// Если уровень повысился, показываем сообщение о повышении
 	if levelUp {
 		levelUpText := fmt.Sprintf("🎉 Поздравляем! Уровень леса повышен до %d уровня!", newLevel)
 		levelUpMsg := tgbotapi.NewMessage(chatID, levelUpText)
-		h.bot.Send(levelUpMsg)
+		h.sendMessage(levelUpMsg)
 	}
 
 	// Сохраняем ID сообщения с результатом в сессии
@@ -1505,23 +1569,25 @@ func (h *BotHandlers) completeChopping(userID int64, chatID int64, resourceName 
 
 		if totalResources > 0 {
 			// Обновляем инлайн клавиатуру с новым состоянием поля
-			h.updateForestField(chatID, forest, session.Resources, session.FieldMessageID)
+			h.updateForestField(chatID, session.Resources, session.FieldMessageID)
 			// Обновляем информационное сообщение с актуальными данными
 			h.updateForestInfoMessage(userID, chatID, forest, session.InfoMessageID)
 		} else {
 			// Поле истощено, устанавливаем кулдаун
-			h.db.ExhaustForest(userID)
+			if err := h.db.ExhaustForest(userID); err != nil {
+				log.Printf("Error exhausting forest: %v", err)
+			}
 
 			// Устанавливаем таймер кулдауна на 60 секунд
 			h.forestCooldowns[userID] = time.Now().Add(60 * time.Second)
 
 			// Удаляем сообщение с полем леса
 			deleteFieldMsg := tgbotapi.NewDeleteMessage(chatID, session.FieldMessageID)
-			h.bot.Request(deleteFieldMsg)
+			h.requestAPI(deleteFieldMsg)
 
 			// Удаляем сообщение с информацией о лесе
 			deleteInfoMsg := tgbotapi.NewDeleteMessage(chatID, session.InfoMessageID)
-			h.bot.Request(deleteInfoMsg)
+			h.requestAPI(deleteInfoMsg)
 
 			exhaustMsg := tgbotapi.NewMessage(chatID, `⚠️ Лес истощен! Необходимо подождать 1 минуту до восстановления деревьев.
 Нажми кнопку "🪓 Рубка" чтобы проверить готовность.`)
@@ -1533,7 +1599,7 @@ func (h *BotHandlers) completeChopping(userID int64, chatID int64, resourceName 
 	}
 }
 
-func (h *BotHandlers) updateForestField(chatID int64, forest *models.Forest, field [][]string, messageID int) {
+func (h *BotHandlers) updateForestField(chatID int64, field [][]string, messageID int) {
 	text := "Выберите дерево для рубки:"
 
 	// Создаем инлайн клавиатуру на основе переданного поля
@@ -1560,7 +1626,7 @@ func (h *BotHandlers) updateForestField(chatID int64, forest *models.Forest, fie
 
 	// Редактируем существующее сообщение вместо отправки нового
 	editMsg := tgbotapi.NewEditMessageTextAndMarkup(chatID, messageID, text, tgbotapi.NewInlineKeyboardMarkup(keyboard...))
-	h.bot.Send(editMsg)
+	h.editMessage(editMsg)
 }
 
 func (h *BotHandlers) updateForestInfoMessage(userID int64, chatID int64, forest *models.Forest, messageID int) {
@@ -1575,7 +1641,7 @@ func (h *BotHandlers) updateForestInfoMessage(userID int64, chatID int64, forest
 
 	// Удаляем старое сообщение
 	deleteMsg := tgbotapi.NewDeleteMessage(chatID, messageID)
-	h.bot.Request(deleteMsg)
+	h.requestAPI(deleteMsg)
 
 	// Создаем новое сообщение с клавиатурой
 	forestKeyboard := tgbotapi.NewReplyKeyboard(
@@ -1587,7 +1653,7 @@ func (h *BotHandlers) updateForestInfoMessage(userID int64, chatID int64, forest
 
 	newMsg := tgbotapi.NewMessage(chatID, infoText)
 	newMsg.ReplyMarkup = forestKeyboard
-	newResponse, _ := h.bot.Send(newMsg)
+	newResponse, _ := h.sendMessageWithResponse(newMsg)
 
 	// Обновляем ID сообщения в сессии
 	if session, exists := h.forestSessions[userID]; exists {

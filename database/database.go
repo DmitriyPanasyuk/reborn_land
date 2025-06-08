@@ -103,7 +103,7 @@ func (db *DB) seedItems() error {
 		{"Простой лук", "tool", 100},
 		{"Стрелы", "ammunition", 0},
 		{"Простая удочка", "tool", 100},
-		{"Деревянный брусок", "material", 0},
+		{"Березовый брус", "material", 0},
 		{"Камень", "material", 0},
 		{"Уголь", "material", 0},
 		{"Сухожилие", "material", 0},
@@ -277,30 +277,33 @@ func (db *DB) GetRecipeRequirements(itemName string) ([]models.RecipeIngredient,
 	// В будущем это можно вынести в отдельную таблицу
 	recipes := map[string][]models.RecipeIngredient{
 		"Простой топор": {
-			{ItemName: "Деревянный брусок", Quantity: 1},
+			{ItemName: "Березовый брус", Quantity: 1},
 			{ItemName: "Камень", Quantity: 1},
 		},
 		"Простая кирка": {
-			{ItemName: "Деревянный брусок", Quantity: 1},
+			{ItemName: "Березовый брус", Quantity: 1},
 			{ItemName: "Камень", Quantity: 1},
 		},
 		"Простой лук": {
-			{ItemName: "Деревянный брусок", Quantity: 1},
+			{ItemName: "Березовый брус", Quantity: 1},
 			{ItemName: "Сухожилие", Quantity: 1},
 		},
 		"Стрелы": {
-			{ItemName: "Деревянный брусок", Quantity: 1},
+			{ItemName: "Березовый брус", Quantity: 1},
 			{ItemName: "Камень", Quantity: 1},
 			{ItemName: "Перо", Quantity: 1},
 		},
 		"Простой нож": {
-			{ItemName: "Деревянный брусок", Quantity: 1},
+			{ItemName: "Березовый брус", Quantity: 1},
 			{ItemName: "Кость", Quantity: 1},
 		},
 		"Простая удочка": {
-			{ItemName: "Деревянный брусок", Quantity: 1},
+			{ItemName: "Березовый брус", Quantity: 1},
 			{ItemName: "Веревка", Quantity: 1},
 			{ItemName: "Крючок", Quantity: 1},
+		},
+		"Березовый брус": {
+			{ItemName: "Береза", Quantity: 2},
 		},
 	}
 
