@@ -586,7 +586,7 @@ func (h *BotHandlers) showMineField(chatID int64, mine *models.Mine, field [][]s
 
 	// Затем отправляем информационное сообщение с клавиатурой
 	// Вычисляем опыт до следующего уровня
-	expToNext := mine.Level*100 - mine.Experience
+	expToNext := ((mine.Level + 1) * 100) - mine.Experience
 
 	infoText := fmt.Sprintf(`⛏ Шахта (Уровень %d)
 До следующего уровня: %d опыта
@@ -882,7 +882,7 @@ func (h *BotHandlers) showForestField(chatID int64, forest *models.Forest, field
 
 	// Затем отправляем информационное сообщение с клавиатурой
 	// Вычисляем опыт до следующего уровня
-	expToNext := forest.Level*100 - forest.Experience
+	expToNext := ((forest.Level + 1) * 100) - forest.Experience
 
 	infoText := fmt.Sprintf(`🪓 Рубка (Уровень %d)
 До следующего уровня: %d опыта
@@ -1046,6 +1046,22 @@ func (h *BotHandlers) startMiningAtPosition(userID int64, chatID int64, resource
 }
 
 func (h *BotHandlers) startMining(userID int64, chatID int64, resourceName string, duration int, callbackID string, row, col int) {
+	// Проверяем, идет ли уже добыча в шахте или рубка в лесу
+	if _, exists := h.miningTimers[userID]; exists {
+		msg := tgbotapi.NewMessage(chatID, "Нельзя начинать новую добычу, пока не закончена текущая.")
+		h.sendMessage(msg)
+		callbackConfig := tgbotapi.NewCallback(callbackID, "")
+		h.requestAPI(callbackConfig)
+		return
+	}
+	if _, exists := h.choppingTimers[userID]; exists {
+		msg := tgbotapi.NewMessage(chatID, "Нельзя начинать новую добычу, пока не закончена текущая.")
+		h.sendMessage(msg)
+		callbackConfig := tgbotapi.NewCallback(callbackID, "")
+		h.requestAPI(callbackConfig)
+		return
+	}
+
 	// Получаем игрока
 	player, err := h.db.GetPlayer(userID)
 	if err != nil {
@@ -1140,7 +1156,7 @@ func (h *BotHandlers) completeMining(userID int64, chatID int64, resourceName st
 		resourceName,
 		updatedPlayer.Satiety,
 		oldDurability-1,
-		mine.Level*100-mine.Experience)
+		((mine.Level+1)*100)-mine.Experience)
 
 	msg := tgbotapi.NewMessage(chatID, resultText)
 	resultResponse, _ := h.sendMessageWithResponse(msg)
@@ -1242,7 +1258,7 @@ func (h *BotHandlers) updateMineField(chatID int64, field [][]string, messageID 
 
 func (h *BotHandlers) updateMineInfoMessage(userID int64, chatID int64, mine *models.Mine, messageID int) {
 	// Вычисляем опыт до следующего уровня
-	expToNext := mine.Level*100 - mine.Experience
+	expToNext := ((mine.Level + 1) * 100) - mine.Experience
 
 	infoText := fmt.Sprintf(`⛏ Шахта (Уровень %d)
 До следующего уровня: %d опыта
@@ -1407,6 +1423,22 @@ func (h *BotHandlers) startChoppingAtPosition(userID int64, chatID int64, resour
 }
 
 func (h *BotHandlers) startChopping(userID int64, chatID int64, resourceName string, duration int, callbackID string, row, col int) {
+	// Проверяем, идет ли уже рубка в лесу или добыча в шахте
+	if _, exists := h.choppingTimers[userID]; exists {
+		msg := tgbotapi.NewMessage(chatID, "Нельзя начинать новую добычу, пока не закончена текущая.")
+		h.sendMessage(msg)
+		callbackConfig := tgbotapi.NewCallback(callbackID, "")
+		h.requestAPI(callbackConfig)
+		return
+	}
+	if _, exists := h.miningTimers[userID]; exists {
+		msg := tgbotapi.NewMessage(chatID, "Нельзя начинать новую добычу, пока не закончена текущая.")
+		h.sendMessage(msg)
+		callbackConfig := tgbotapi.NewCallback(callbackID, "")
+		h.requestAPI(callbackConfig)
+		return
+	}
+
 	// Получаем игрока
 	player, err := h.db.GetPlayer(userID)
 	if err != nil {
@@ -1533,7 +1565,7 @@ func (h *BotHandlers) completeChopping(userID int64, chatID int64, resourceName 
 		resourceName,
 		updatedPlayer.Satiety,
 		oldDurability-1,
-		forest.Level*100-forest.Experience)
+		((forest.Level+1)*100)-forest.Experience)
 
 	msg := tgbotapi.NewMessage(chatID, resultText)
 	resultResponse, _ := h.sendMessageWithResponse(msg)
@@ -1631,7 +1663,7 @@ func (h *BotHandlers) updateForestField(chatID int64, field [][]string, messageI
 
 func (h *BotHandlers) updateForestInfoMessage(userID int64, chatID int64, forest *models.Forest, messageID int) {
 	// Вычисляем опыт до следующего уровня
-	expToNext := forest.Level*100 - forest.Experience
+	expToNext := ((forest.Level + 1) * 100) - forest.Experience
 
 	infoText := fmt.Sprintf(`🪓 Рубка (Уровень %d)
 До следующего уровня: %d опыта
