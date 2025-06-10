@@ -70,6 +70,8 @@ func (h *BotHandlers) handleMessage(message *tgbotapi.Message) {
 		h.handleGathering(message)
 	case "🔨 Рабочее место":
 		h.handleWorkplace(message)
+	case "📜 Квесты":
+		h.handleQuest(message)
 	case "🛠 Верстак":
 		h.handleWorkbench(message)
 	case "🧱 Печь":
@@ -1298,6 +1300,7 @@ func (h *BotHandlers) sendWithKeyboard(msg tgbotapi.MessageConfig) {
 		),
 		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton("🔨 Рабочее место"),
+			tgbotapi.NewKeyboardButton("📜 Квесты"),
 		),
 	)
 	keyboard.ResizeKeyboard = true
@@ -1691,4 +1694,9 @@ func (h *BotHandlers) updateForestInfoMessage(userID int64, chatID int64, forest
 	if session, exists := h.forestSessions[userID]; exists {
 		session.InfoMessageID = newResponse.MessageID
 	}
+}
+
+func (h *BotHandlers) handleQuest(message *tgbotapi.Message) {
+	msg := tgbotapi.NewMessage(message.Chat.ID, "📜 Функция квестов пока в разработке...")
+	h.sendMessage(msg)
 }
