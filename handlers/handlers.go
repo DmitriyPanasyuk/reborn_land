@@ -78,6 +78,8 @@ func (h *BotHandlers) handleMessage(message *tgbotapi.Message) {
 		h.handleFurnace(message)
 	case "🔥 Костер":
 		h.handleCampfire(message)
+	case "🏗️ Строительство":
+		h.handleConstruction(message)
 	case "◀️ Назад":
 		h.handleBack(message)
 	case "⛏ Шахта":
@@ -102,6 +104,8 @@ func (h *BotHandlers) handleMessage(message *tgbotapi.Message) {
 		h.handleCreateFishingRod(message)
 	case "/create_birch_plank":
 		h.handleCreateBirchPlank(message)
+	case "/create_simple_hut":
+		h.handleCreateSimpleHut(message)
 	case "/eat":
 		h.handleEat(message)
 	case "🎯 Охота":
@@ -413,6 +417,14 @@ func (h *BotHandlers) handleFurnace(message *tgbotapi.Message) {
 
 func (h *BotHandlers) handleCampfire(message *tgbotapi.Message) {
 	msg := tgbotapi.NewMessage(message.Chat.ID, "🔥 Функция костра пока в разработке...")
+	h.sendMessage(msg)
+}
+
+func (h *BotHandlers) handleConstruction(message *tgbotapi.Message) {
+	constructionText := `🏠 Доступные постройки:
+Простая хижина /create_simple_hut`
+
+	msg := tgbotapi.NewMessage(message.Chat.ID, constructionText)
 	h.sendMessage(msg)
 }
 
@@ -958,6 +970,67 @@ func (h *BotHandlers) handleCreateBirchPlank(message *tgbotapi.Message) {
 	h.showRecipe(message, "Березовый брус")
 }
 
+func (h *BotHandlers) handleCreateSimpleHut(message *tgbotapi.Message) {
+	userID := message.From.ID
+
+	// Получаем игрока
+	player, err := h.db.GetPlayer(userID)
+	if err != nil {
+		log.Printf("Error getting player: %v", err)
+		msg := tgbotapi.NewMessage(message.Chat.ID, "Сначала зарегистрируйтесь с помощью команды /start")
+		h.sendMessage(msg)
+		return
+	}
+
+	// Определяем требования для строительства простой хижины
+	requirements := []struct {
+		ItemName string
+		Quantity int
+	}{
+		{"Береза", 20},
+		{"Березовый брус", 10},
+		{"Камень", 15},
+		{"Ягоды", 10},
+	}
+
+	// Формируем текст рецепта
+	recipeText := "Для строительства необходимо следующее:"
+	canBuild := true
+
+	for _, req := range requirements {
+		playerQuantity, err := h.db.GetItemQuantityInInventory(player.ID, req.ItemName)
+		if err != nil {
+			log.Printf("Error getting inventory quantity: %v", err)
+			playerQuantity = 0
+		}
+
+		if playerQuantity < req.Quantity {
+			canBuild = false
+		}
+
+		recipeText += fmt.Sprintf("\n%s - %d/%d шт.", req.ItemName, playerQuantity, req.Quantity)
+	}
+
+	// Добавляем кнопку "Создать"
+	var buttonText string
+	if canBuild {
+		buttonText = "Создать ✅"
+	} else {
+		buttonText = "Создать ❌"
+	}
+
+	msg := tgbotapi.NewMessage(message.Chat.ID, recipeText)
+
+	// Создаем инлайн клавиатуру с кнопкой создать
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(buttonText, "craft_Простая хижина"),
+		),
+	)
+	msg.ReplyMarkup = keyboard
+	h.sendMessage(msg)
+}
+
 func (h *BotHandlers) showRecipe(message *tgbotapi.Message, itemName string) {
 	userID := message.From.ID
 
@@ -1335,6 +1408,7 @@ func (h *BotHandlers) sendWorkplaceKeyboard(msg tgbotapi.MessageConfig) {
 		),
 		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton("🔥 Костер"),
+			tgbotapi.NewKeyboardButton("🏗️ Строительство"),
 		),
 		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton("◀️ Назад"),
@@ -1733,7 +1807,7 @@ func (h *BotHandlers) sendQuestKeyboard(msg tgbotapi.MessageConfig) {
 	keyboard := tgbotapi.NewReplyKeyboard(
 		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton("📖 Лор"),
-			tgbotapi.NewKeyboardButton("📅 Ежедневные"),
+			tgbotapi.NewKeyboardButton("🗓️ Ежедневные"),
 		),
 		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton("📆 Еженедельные"),
