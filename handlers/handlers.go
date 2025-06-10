@@ -110,6 +110,12 @@ func (h *BotHandlers) handleMessage(message *tgbotapi.Message) {
 		h.handleForestGathering(message)
 	case "🪓 Рубка":
 		h.handleChopping(message)
+	case "📖 Лор":
+		h.handleLore(message)
+	case "🗓️ Ежедневные":
+		h.handleDailyQuests(message)
+	case "📆 Еженедельные":
+		h.handleWeeklyQuests(message)
 	default:
 		// Неизвестная команда
 		msg := tgbotapi.NewMessage(message.Chat.ID, "Неизвестная команда. Используйте /start для начала игры.")
@@ -468,11 +474,23 @@ func (h *BotHandlers) handleBack(message *tgbotapi.Message) {
 	}
 
 	// Проверяем текущее местоположение игрока
-	if location, exists := h.playerLocation[userID]; exists && location == "forest" {
-		// Игрок в лесу - возвращаемся в меню добычи
-		delete(h.playerLocation, userID) // Убираем местоположение
-		msg := tgbotapi.NewMessage(chatID, "🌿 Выберите место для добычи ресурсов:")
-		h.sendGatheringKeyboard(msg)
+	if location, exists := h.playerLocation[userID]; exists {
+		switch location {
+		case "forest":
+			// Игрок в лесу - возвращаемся в меню добычи
+			delete(h.playerLocation, userID) // Убираем местоположение
+			msg := tgbotapi.NewMessage(chatID, "🌿 Выберите место для добычи ресурсов:")
+			h.sendGatheringKeyboard(msg)
+		case "quest":
+			// Игрок в меню квестов - возвращаемся в главное меню
+			delete(h.playerLocation, userID) // Убираем местоположение
+			msg := tgbotapi.NewMessage(chatID, "🏠 Возвращаемся к главному меню.")
+			h.sendWithKeyboard(msg)
+		default:
+			// Обычное возвращение в главное меню
+			msg := tgbotapi.NewMessage(chatID, "🏠 Возвращаемся к главному меню.")
+			h.sendWithKeyboard(msg)
+		}
 	} else {
 		// Обычное возвращение в главное меню
 		msg := tgbotapi.NewMessage(chatID, "🏠 Возвращаемся к главному меню.")
@@ -1697,6 +1715,49 @@ func (h *BotHandlers) updateForestInfoMessage(userID int64, chatID int64, forest
 }
 
 func (h *BotHandlers) handleQuest(message *tgbotapi.Message) {
-	msg := tgbotapi.NewMessage(message.Chat.ID, "📜 Функция квестов пока в разработке...")
+	userID := message.From.ID
+
+	// Устанавливаем местоположение игрока
+	h.playerLocation[userID] = "quest"
+
+	questText := `📜 Квесты
+
+Выберите тип квестов:`
+
+	msg := tgbotapi.NewMessage(message.Chat.ID, questText)
+	h.sendQuestKeyboard(msg)
+}
+
+func (h *BotHandlers) sendQuestKeyboard(msg tgbotapi.MessageConfig) {
+	// Создаем клавиатуру квестов
+	keyboard := tgbotapi.NewReplyKeyboard(
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton("📖 Лор"),
+			tgbotapi.NewKeyboardButton("📅 Ежедневные"),
+		),
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton("📆 Еженедельные"),
+		),
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton("◀️ Назад"),
+		),
+	)
+	keyboard.ResizeKeyboard = true
+	msg.ReplyMarkup = keyboard
+	h.sendMessage(msg)
+}
+
+func (h *BotHandlers) handleLore(message *tgbotapi.Message) {
+	msg := tgbotapi.NewMessage(message.Chat.ID, "📖 Функция лор-квестов пока в разработке...")
+	h.sendMessage(msg)
+}
+
+func (h *BotHandlers) handleDailyQuests(message *tgbotapi.Message) {
+	msg := tgbotapi.NewMessage(message.Chat.ID, "🗓️ Функция ежедневных квестов пока в разработке...")
+	h.sendMessage(msg)
+}
+
+func (h *BotHandlers) handleWeeklyQuests(message *tgbotapi.Message) {
+	msg := tgbotapi.NewMessage(message.Chat.ID, "📆 Функция еженедельных квестов пока в разработке...")
 	h.sendMessage(msg)
 }
