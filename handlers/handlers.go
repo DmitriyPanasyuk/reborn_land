@@ -179,8 +179,9 @@ func (h *BotHandlers) startRegistration(message *tgbotapi.Message) {
 	msg := tgbotapi.NewMessage(message.Chat.ID, welcomeText)
 	h.sendMessage(msg)
 
-	// Ждем 2 секунды и отправляем второе сообщение
+	// Запускаем последовательность сообщений с задержками
 	go func() {
+		// Ждем 2 секунды и отправляем второе сообщение
 		time.Sleep(2 * time.Second)
 
 		secondText := `🧭 Что тебя ждёт:
@@ -194,7 +195,25 @@ func (h *BotHandlers) startRegistration(message *tgbotapi.Message) {
 		msg2 := tgbotapi.NewMessage(message.Chat.ID, secondText)
 		h.sendMessage(msg2)
 
-		// Сразу после второго сообщения просим имя
+		// Ждем еще 2 секунды и отправляем третье сообщение
+		time.Sleep(2 * time.Second)
+
+		thirdText := `Мир пал — не в огне и не в крови,
+а в молчании. Цивилизации исчезли, города заросли, 
+знания рассыпались, словно пыль. 
+Никто не помнит, что случилось. 
+Осталась только Земля. 
+Дикая, первобытная. Но она помнит...
+
+Ты — один из первых, кто пробудился. 
+Без имени, без памяти. Но с искрой внутри. 
+Искрой Возрождения. Всё, что ты построишь, — будет первым шагом к пробуждению этого мира. 
+А может, и правды...`
+
+		msg3 := tgbotapi.NewMessage(message.Chat.ID, thirdText)
+		h.sendMessage(msg3)
+
+		// Сразу после третьего сообщения просим имя
 		nameMsg := tgbotapi.NewMessage(message.Chat.ID, "Придумай себе имя:")
 		h.sendMessage(nameMsg)
 
@@ -252,9 +271,10 @@ func (h *BotHandlers) handleProfile(message *tgbotapi.Message) {
 
 	profileText := fmt.Sprintf(`👤 Профиль игрока
 Имя: %s
+Telegram ID: %d
 Уровень: %d
 Опыт: %d/100
-Сытость: %d/100`, player.Name, player.Level, player.Experience, player.Satiety)
+Сытость: %d/100`, player.Name, player.TelegramID, player.Level, player.Experience, player.Satiety)
 
 	msg := tgbotapi.NewMessage(message.Chat.ID, profileText)
 	h.sendMessage(msg)
