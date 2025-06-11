@@ -14,30 +14,36 @@ import (
 )
 
 type BotHandlers struct {
-	bot             *tgbotapi.BotAPI
-	db              *database.DB
-	waitingForName  map[int64]bool
-	mineSessions    map[int64]*models.MineSession
-	forestSessions  map[int64]*models.ForestSession
-	miningTimers    map[int64]*time.Timer
-	choppingTimers  map[int64]*time.Timer
-	mineCooldowns   map[int64]time.Time // Время окончания кулдауна шахты
-	forestCooldowns map[int64]time.Time // Время окончания кулдауна леса
-	playerLocation  map[int64]string    // Текущее местоположение игрока
+	bot                *tgbotapi.BotAPI
+	db                 *database.DB
+	waitingForName     map[int64]bool
+	mineSessions       map[int64]*models.MineSession
+	forestSessions     map[int64]*models.ForestSession
+	gatheringSessions  map[int64]*models.GatheringSession
+	miningTimers       map[int64]*time.Timer
+	choppingTimers     map[int64]*time.Timer
+	gatheringTimers    map[int64]*time.Timer
+	mineCooldowns      map[int64]time.Time // Время окончания кулдауна шахты
+	forestCooldowns    map[int64]time.Time // Время окончания кулдауна леса
+	gatheringCooldowns map[int64]time.Time // Время окончания кулдауна сбора
+	playerLocation     map[int64]string    // Текущее местоположение игрока
 }
 
 func New(bot *tgbotapi.BotAPI, db *database.DB) *BotHandlers {
 	return &BotHandlers{
-		bot:             bot,
-		db:              db,
-		waitingForName:  make(map[int64]bool),
-		mineSessions:    make(map[int64]*models.MineSession),
-		forestSessions:  make(map[int64]*models.ForestSession),
-		miningTimers:    make(map[int64]*time.Timer),
-		choppingTimers:  make(map[int64]*time.Timer),
-		mineCooldowns:   make(map[int64]time.Time),
-		forestCooldowns: make(map[int64]time.Time),
-		playerLocation:  make(map[int64]string),
+		bot:                bot,
+		db:                 db,
+		waitingForName:     make(map[int64]bool),
+		mineSessions:       make(map[int64]*models.MineSession),
+		forestSessions:     make(map[int64]*models.ForestSession),
+		gatheringSessions:  make(map[int64]*models.GatheringSession),
+		miningTimers:       make(map[int64]*time.Timer),
+		choppingTimers:     make(map[int64]*time.Timer),
+		gatheringTimers:    make(map[int64]*time.Timer),
+		mineCooldowns:      make(map[int64]time.Time),
+		forestCooldowns:    make(map[int64]time.Time),
+		gatheringCooldowns: make(map[int64]time.Time),
+		playerLocation:     make(map[int64]string),
 	}
 }
 
@@ -447,6 +453,13 @@ func (h *BotHandlers) handleBack(message *tgbotapi.Message) {
 		return
 	}
 
+	if _, isGathering := h.gatheringTimers[userID]; isGathering {
+		// Если идет сбор, не позволяем выйти
+		msg := tgbotapi.NewMessage(chatID, "Идет сбор ягод.")
+		h.sendMessage(msg)
+		return
+	}
+
 	// Проверяем, есть ли активная сессия шахты
 	if session, exists := h.mineSessions[userID]; exists {
 		// Удаляем сообщение с полем шахты
@@ -478,6 +491,25 @@ func (h *BotHandlers) handleBack(message *tgbotapi.Message) {
 
 		// Удаляем сессию леса
 		delete(h.forestSessions, userID)
+
+		// Возвращаемся в меню леса
+		msg := tgbotapi.NewMessage(chatID, "🌲 Ты входишь в густой лес. Под ногами хрустит трава, в кронах поют птицы, а где-то вдалеке слышен треск ветки — ты здесь не один...\n\nЗдесь ты можешь:\n🪓 Рубить деревья\n🎯 Охотиться на дичь\n🌿 Собирать травы и ягоды")
+		h.sendForestKeyboard(msg)
+		return
+	}
+
+	// Проверяем, есть ли активная сессия сбора
+	if session, exists := h.gatheringSessions[userID]; exists {
+		// Удаляем сообщение с полем сбора
+		deleteFieldMsg := tgbotapi.NewDeleteMessage(chatID, session.FieldMessageID)
+		h.requestAPI(deleteFieldMsg)
+
+		// Удаляем сообщение с информацией о сборе
+		deleteInfoMsg := tgbotapi.NewDeleteMessage(chatID, session.InfoMessageID)
+		h.requestAPI(deleteInfoMsg)
+
+		// Удаляем сессию сбора
+		delete(h.gatheringSessions, userID)
 
 		// Возвращаемся в меню леса
 		msg := tgbotapi.NewMessage(chatID, "🌲 Ты входишь в густой лес. Под ногами хрустит трава, в кронах поют птицы, а где-то вдалеке слышен треск ветки — ты здесь не один...\n\nЗдесь ты можешь:\n🪓 Рубить деревья\n🎯 Охотиться на дичь\n🌿 Собирать травы и ягоды")
@@ -938,8 +970,183 @@ func (h *BotHandlers) showForestField(chatID int64, forest *models.Forest, field
 }
 
 func (h *BotHandlers) handleForestGathering(message *tgbotapi.Message) {
-	msg := tgbotapi.NewMessage(message.Chat.ID, "🌿 Функция сбора растений пока в разработке...")
-	h.sendMessage(msg)
+	userID := message.From.ID
+
+	// Проверяем, активен ли кулдаун сбора
+	if cooldownEnd, exists := h.gatheringCooldowns[userID]; exists {
+		if time.Now().Before(cooldownEnd) {
+			// Кулдаун еще активен
+			remainingTime := time.Until(cooldownEnd)
+			msg := tgbotapi.NewMessage(message.Chat.ID,
+				fmt.Sprintf("До обновления ягодных кустов осталось %d сек.", int(remainingTime.Seconds())))
+			h.sendMessage(msg)
+			return
+		} else {
+			// Кулдаун истек, удаляем его
+			delete(h.gatheringCooldowns, userID)
+		}
+	}
+
+	// Получаем игрока
+	player, err := h.db.GetPlayer(userID)
+	if err != nil {
+		log.Printf("Error getting player: %v", err)
+		msg := tgbotapi.NewMessage(message.Chat.ID, "Сначала зарегистрируйтесь с помощью команды /start")
+		h.sendMessage(msg)
+		return
+	}
+
+	// Проверяем сытость игрока
+	if player.Satiety <= 0 {
+		msg := tgbotapi.NewMessage(message.Chat.ID, "Сытость 0. Необходимо поесть.")
+		h.sendMessage(msg)
+		return
+	}
+
+	// Получаем или создаем данные о сборе
+	gathering, err := h.db.GetOrCreateGathering(player.ID)
+	if err != nil {
+		log.Printf("Error getting gathering: %v", err)
+		msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка при работе со сбором.")
+		h.sendMessage(msg)
+		return
+	}
+
+	// Если сбор был истощен в базе данных, восстанавливаем его
+	if gathering.IsExhausted {
+		if err := h.db.SetGatheringExhausted(player.ID, false); err != nil {
+			log.Printf("Error setting gathering exhausted: %v", err)
+		}
+	}
+
+	// Создаем новую сессию сбора
+	h.createNewGatheringSession(userID, message.Chat.ID)
+}
+
+func (h *BotHandlers) createNewGatheringSession(userID int64, chatID int64) {
+	// Получаем игрока
+	player, err := h.db.GetPlayer(userID)
+	if err != nil {
+		log.Printf("Error getting player in createNewGatheringSession: %v", err)
+		return
+	}
+
+	// Получаем или создаем данные о сборе
+	gathering, err := h.db.GetOrCreateGathering(player.ID)
+	if err != nil {
+		log.Printf("Error getting gathering in createNewGatheringSession: %v", err)
+		return
+	}
+
+	// Генерируем случайное поле
+	field := h.generateRandomGatheringField()
+
+	// Показываем поле и получаем MessageID
+	fieldMessageID, infoMessageID := h.showGatheringField(chatID, field, gathering)
+
+	// Создаем сессию
+	session := &models.GatheringSession{
+		PlayerID:       userID,
+		Resources:      field,
+		IsActive:       true,
+		StartedAt:      time.Now(),
+		FieldMessageID: fieldMessageID,
+		InfoMessageID:  infoMessageID,
+	}
+
+	h.gatheringSessions[userID] = session
+}
+
+func (h *BotHandlers) generateRandomGatheringField() [][]string {
+	// Создаем пустое поле 3x3
+	field := make([][]string, 3)
+	for i := range field {
+		field[i] = make([]string, 3)
+	}
+
+	// Доступные ресурсы для сбора
+	availableResources := []string{"🍇"}
+
+	// Используем время для псевдослучайности
+	now := time.Now()
+	seed := now.UnixNano()
+
+	// Создаем список всех позиций
+	positions := [][2]int{
+		{0, 0}, {0, 1}, {0, 2},
+		{1, 0}, {1, 1}, {1, 2},
+		{2, 0}, {2, 1}, {2, 2},
+	}
+
+	// Перемешиваем позиции с использованием времени
+	for i := len(positions) - 1; i > 0; i-- {
+		j := int((seed + int64(i*13)) % int64(i+1))
+		positions[i], positions[j] = positions[j], positions[i]
+	}
+
+	// Размещаем 3 ресурса в первых 3 позициях
+	for i := 0; i < 3; i++ {
+		pos := positions[i]
+		// Выбираем ресурс псевдослучайно
+		resourceIndex := int((seed + int64(i*17) + int64(pos[0]*3) + int64(pos[1])) % int64(len(availableResources)))
+		resourceType := availableResources[resourceIndex]
+		field[pos[0]][pos[1]] = resourceType
+	}
+
+	return field
+}
+
+func (h *BotHandlers) showGatheringField(chatID int64, field [][]string, gathering *models.Gathering) (int, int) {
+	// Создаем инлайн клавиатуру на основе переданного поля
+	var keyboard [][]tgbotapi.InlineKeyboardButton
+	for i := 0; i < 3; i++ {
+		var row []tgbotapi.InlineKeyboardButton
+		for j := 0; j < 3; j++ {
+			cell := field[i][j]
+			var callbackData string
+
+			switch cell {
+			case "🍇":
+				callbackData = fmt.Sprintf("gathering_berry_%d_%d", i, j)
+			default:
+				callbackData = fmt.Sprintf("gathering_empty_%d_%d", i, j)
+				cell = " "
+			}
+
+			button := tgbotapi.NewInlineKeyboardButtonData(cell, callbackData)
+			row = append(row, button)
+		}
+		keyboard = append(keyboard, row)
+	}
+
+	// Сначала отправляем поле сбора с инлайн кнопками
+	fieldMsg := tgbotapi.NewMessage(chatID, "Выберите ресурс для сбора:")
+	fieldMsg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(keyboard...)
+	fieldResponse, _ := h.sendChattableWithResponse(fieldMsg)
+
+	// Затем отправляем информационное сообщение с клавиатурой
+	// Вычисляем опыт до следующего уровня
+	expToNext := (gathering.Level * 100) - gathering.Experience
+
+	infoText := fmt.Sprintf(`🌿 Сбор (Уровень %d)
+До следующего уровня: %d опыта
+
+Доступные ресурсы:
+🍇 Ягоды`, gathering.Level, expToNext)
+
+	gatheringKeyboard := tgbotapi.NewReplyKeyboard(
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton("◀️ Назад"),
+		),
+	)
+	gatheringKeyboard.ResizeKeyboard = true
+
+	infoMsg := tgbotapi.NewMessage(chatID, infoText)
+	infoMsg.ReplyMarkup = gatheringKeyboard
+	infoResponse, _ := h.sendChattableWithResponse(infoMsg)
+
+	// Возвращаем ID поля и ID информационного сообщения
+	return fieldResponse.MessageID, infoResponse.MessageID
 }
 
 func (h *BotHandlers) handleCreateAxe(message *tgbotapi.Message) {
@@ -990,7 +1197,7 @@ func (h *BotHandlers) handleCreateSimpleHut(message *tgbotapi.Message) {
 		{"Береза", 20},
 		{"Березовый брус", 10},
 		{"Камень", 15},
-		{"Ягоды", 10},
+		{"Лесная ягода", 10},
 	}
 
 	// Формируем текст рецепта
@@ -1121,6 +1328,17 @@ func (h *BotHandlers) handleCallbackQuery(callback *tgbotapi.CallbackQuery) {
 	} else if strings.HasPrefix(data, "forest_empty_") {
 		// Пустая ячейка
 		callbackConfig := tgbotapi.NewCallback(callback.ID, "Здесь нет деревьев!")
+		h.requestAPI(callbackConfig)
+	} else if strings.HasPrefix(data, "gathering_berry_") {
+		// Обрабатываем callback'и от сбора
+		parts := strings.Split(data, "_")
+		if len(parts) == 4 {
+			row, col := parts[2], parts[3]
+			h.startGatheringAtPosition(userID, callback.Message.Chat.ID, "Лесная ягода", 10, callback.ID, row, col)
+		}
+	} else if strings.HasPrefix(data, "gathering_empty_") {
+		// Пустая ячейка
+		callbackConfig := tgbotapi.NewCallback(callback.ID, "Здесь нет ягод!")
 		h.requestAPI(callbackConfig)
 	} else {
 		// Остальные callback (крафт и т.д.)
@@ -1585,34 +1803,38 @@ func (h *BotHandlers) startChopping(userID int64, chatID int64, resourceName str
 
 func (h *BotHandlers) updateChoppingProgress(userID int64, chatID int64, messageID int, resourceName string, totalDuration int, durability int, row, col int) {
 	startTime := time.Now()
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
 
 	for {
-		elapsed := time.Since(startTime)
-		if elapsed >= time.Duration(totalDuration)*time.Second {
-			break
-		}
+		select {
+		case <-ticker.C:
+			elapsed := time.Since(startTime).Seconds()
+			progress := int(elapsed)
 
-		percentage := int((elapsed.Seconds() / float64(totalDuration)) * 100)
-		progressText := fmt.Sprintf(`Идет рубка дерева "%s". Время рубки %d сек.
+			if progress >= totalDuration {
+				// Рубка завершена
+				h.completeChopping(userID, chatID, resourceName, durability, messageID, row, col)
+				return
+			}
+
+			// Обновляем прогресс бар
+			percentage := int((elapsed / float64(totalDuration)) * 100)
+			progressBar := h.createProgressBar(progress, totalDuration)
+
+			newText := fmt.Sprintf(`Началась рубка дерева "%s". Время рубки %d сек.
 			
-%s %d%%`, resourceName, totalDuration, h.createProgressBar(percentage, 100), percentage)
+%s %d%%`, resourceName, totalDuration, progressBar, percentage)
 
-		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, progressText)
-		h.editMessage(editMsg)
+			// Редактируем сообщение
+			editMsg := tgbotapi.NewEditMessageText(chatID, messageID, newText)
+			h.editMessage(editMsg)
 
-		time.Sleep(1 * time.Second)
+		case <-time.After(time.Duration(totalDuration+1) * time.Second):
+			// Таймаут на случай, если что-то пошло не так
+			return
+		}
 	}
-
-	// После завершения показываем 100% и завершаем
-	finalText := fmt.Sprintf(`Идет рубка дерева "%s". Время рубки %d сек.
-		
-%s 100%%`, resourceName, totalDuration, h.createProgressBar(100, 100))
-
-	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, finalText)
-	h.editMessage(editMsg)
-
-	// Завершаем рубку
-	h.completeChopping(userID, chatID, resourceName, durability, messageID, row, col)
 }
 
 func (h *BotHandlers) completeChopping(userID int64, chatID int64, resourceName string, oldDurability int, messageID int, row, col int) {
@@ -1834,4 +2056,293 @@ func (h *BotHandlers) handleDailyQuests(message *tgbotapi.Message) {
 func (h *BotHandlers) handleWeeklyQuests(message *tgbotapi.Message) {
 	msg := tgbotapi.NewMessage(message.Chat.ID, "📆 Функция еженедельных квестов пока в разработке...")
 	h.sendMessage(msg)
+}
+
+// Функции для сбора в лесу
+func (h *BotHandlers) startGatheringAtPosition(userID int64, chatID int64, resourceName string, duration int, callbackID string, rowStr, colStr string) {
+	row, _ := strconv.Atoi(rowStr)
+	col, _ := strconv.Atoi(colStr)
+
+	h.startGathering(userID, chatID, resourceName, duration, callbackID, row, col)
+}
+
+func (h *BotHandlers) startGathering(userID int64, chatID int64, resourceName string, duration int, callbackID string, row, col int) {
+	// Проверяем, идет ли уже сбор или добыча/рубка
+	if _, exists := h.gatheringTimers[userID]; exists {
+		msg := tgbotapi.NewMessage(chatID, "Нельзя начинать новую добычу, пока не закончена текущая.")
+		h.sendMessage(msg)
+		callbackConfig := tgbotapi.NewCallback(callbackID, "")
+		h.requestAPI(callbackConfig)
+		return
+	}
+	if _, exists := h.miningTimers[userID]; exists {
+		msg := tgbotapi.NewMessage(chatID, "Нельзя начинать новую добычу, пока не закончена текущая.")
+		h.sendMessage(msg)
+		callbackConfig := tgbotapi.NewCallback(callbackID, "")
+		h.requestAPI(callbackConfig)
+		return
+	}
+	if _, exists := h.choppingTimers[userID]; exists {
+		msg := tgbotapi.NewMessage(chatID, "Нельзя начинать новую добычу, пока не закончена текущая.")
+		h.sendMessage(msg)
+		callbackConfig := tgbotapi.NewCallback(callbackID, "")
+		h.requestAPI(callbackConfig)
+		return
+	}
+
+	// Получаем игрока
+	player, err := h.db.GetPlayer(userID)
+	if err != nil {
+		log.Printf("Error getting player: %v", err)
+		return
+	}
+
+	// Проверяем наличие ножа
+	hasTool, durability, err := h.db.HasToolInInventory(player.ID, "Простой нож")
+	if err != nil {
+		log.Printf("Error checking tool: %v", err)
+		return
+	}
+
+	if !hasTool {
+		msg := tgbotapi.NewMessage(chatID, `В инвентаре нет предмета "Простой нож".`)
+		h.sendMessage(msg)
+		callbackConfig := tgbotapi.NewCallback(callbackID, "")
+		h.requestAPI(callbackConfig)
+		return
+	}
+
+	// Отвечаем на callback
+	callbackConfig := tgbotapi.NewCallback(callbackID, "")
+	h.requestAPI(callbackConfig)
+
+	// Удаляем предыдущее сообщение о результате сбора, если оно существует
+	if session, exists := h.gatheringSessions[userID]; exists && session.ResultMessageID != 0 {
+		deleteResultMsg := tgbotapi.NewDeleteMessage(chatID, session.ResultMessageID)
+		h.requestAPI(deleteResultMsg)
+		session.ResultMessageID = 0 // Сбрасываем ID
+	}
+
+	// Отправляем сообщение о начале сбора
+	initialText := fmt.Sprintf(`Идет сбор "%s". Время сбора %d сек.
+		
+%s 0%%`, resourceName, duration, h.createProgressBar(0, 100))
+
+	gatheringMsg := tgbotapi.NewMessage(chatID, initialText)
+	sentMsg, _ := h.sendMessageWithResponse(gatheringMsg)
+
+	// Запускаем горутину для обновления прогресс бара
+	go h.updateGatheringProgress(userID, chatID, sentMsg.MessageID, resourceName, duration, durability, row, col)
+
+	// Создаем заглушку таймера
+	timer := time.NewTimer(time.Duration(duration) * time.Second)
+	h.gatheringTimers[userID] = timer
+}
+
+func (h *BotHandlers) updateGatheringProgress(userID int64, chatID int64, messageID int, resourceName string, totalDuration int, durability int, row, col int) {
+	startTime := time.Now()
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			elapsed := time.Since(startTime).Seconds()
+			progress := int(elapsed)
+
+			if progress >= totalDuration {
+				// Сбор завершен
+				h.completeGathering(userID, chatID, resourceName, durability, messageID, row, col)
+				return
+			}
+
+			// Обновляем прогресс бар
+			percentage := int((elapsed / float64(totalDuration)) * 100)
+			progressBar := h.createProgressBar(progress, totalDuration)
+
+			newText := fmt.Sprintf(`Начался сбор "%s". Время сбора %d сек.
+			
+%s %d%%`, resourceName, totalDuration, progressBar, percentage)
+
+			// Редактируем сообщение
+			editMsg := tgbotapi.NewEditMessageText(chatID, messageID, newText)
+			h.editMessage(editMsg)
+
+		case <-time.After(time.Duration(totalDuration+1) * time.Second):
+			// Таймаут на случай, если что-то пошло не так
+			return
+		}
+	}
+}
+
+func (h *BotHandlers) completeGathering(userID int64, chatID int64, resourceName string, oldDurability int, messageID int, row, col int) {
+	// Получаем игрока
+	player, err := h.db.GetPlayer(userID)
+	if err != nil {
+		log.Printf("Error getting player: %v", err)
+		return
+	}
+
+	// Добавляем ресурс в инвентарь
+	if err := h.db.AddItemToInventory(player.ID, resourceName, 1); err != nil {
+		log.Printf("Error adding item to inventory: %v", err)
+	}
+
+	// Обновляем прочность ножа и сытость
+	if err := h.db.UpdateItemDurability(player.ID, "Простой нож", 1); err != nil {
+		log.Printf("Error updating item durability: %v", err)
+	}
+	if err := h.db.UpdatePlayerSatiety(player.ID, -1); err != nil {
+		log.Printf("Error updating player satiety: %v", err)
+	}
+
+	// Добавляем опыт за сбор
+	levelUp, newLevel, err := h.db.UpdateGatheringExperience(player.ID, 2)
+	if err != nil {
+		log.Printf("Error updating gathering experience: %v", err)
+	}
+
+	// Получаем обновленные данные
+	updatedPlayer, _ := h.db.GetPlayer(userID)
+	updatedGathering, _ := h.db.GetOrCreateGathering(player.ID)
+
+	// Удаляем сообщение о сборе
+	deleteMsg := tgbotapi.NewDeleteMessage(chatID, messageID)
+	h.requestAPI(deleteMsg)
+
+	// Показываем результат с системой уровней для сбора
+	resultText := fmt.Sprintf(`✅ Ты собрал "%s"!
+Получено опыта: 2
+Сытость: %d/100
+Прочность ножа: %d/100
+До следующего уровня: %d опыта`,
+		resourceName,
+		updatedPlayer.Satiety,
+		oldDurability-1,
+		(updatedGathering.Level*100)-updatedGathering.Experience)
+
+	msg := tgbotapi.NewMessage(chatID, resultText)
+	resultResponse, _ := h.sendMessageWithResponse(msg)
+
+	// Если уровень повысился, показываем сообщение о повышении
+	if levelUp {
+		levelUpText := fmt.Sprintf("🎉 Поздравляем! Уровень сбора повышен до %d уровня!", newLevel)
+		levelUpMsg := tgbotapi.NewMessage(chatID, levelUpText)
+		h.sendMessage(levelUpMsg)
+	}
+
+	// Сохраняем ID сообщения с результатом в сессии
+	if session, exists := h.gatheringSessions[userID]; exists {
+		session.ResultMessageID = resultResponse.MessageID
+	}
+
+	// Убираем таймер
+	delete(h.gatheringTimers, userID)
+
+	// Обновляем поле - убираем собранный ресурс
+	if session, exists := h.gatheringSessions[userID]; exists {
+		session.Resources[row][col] = ""
+
+		// Проверяем, остались ли ресурсы в поле
+		totalResources := 0
+		for i := 0; i < 3; i++ {
+			for j := 0; j < 3; j++ {
+				if session.Resources[i][j] != "" {
+					totalResources++
+				}
+			}
+		}
+
+		if totalResources > 0 {
+			// Обновляем инлайн клавиатуру с новым состоянием поля
+			h.updateGatheringField(chatID, session.Resources, session.FieldMessageID)
+			// Обновляем информационное сообщение с актуальными данными
+			h.updateGatheringInfoMessage(userID, chatID, updatedGathering, session.InfoMessageID)
+		} else {
+			// Поле истощено, устанавливаем кулдаун
+			if err := h.db.ExhaustGathering(userID); err != nil {
+				log.Printf("Error exhausting gathering: %v", err)
+			}
+
+			// Устанавливаем таймер кулдауна на 60 секунд
+			h.gatheringCooldowns[userID] = time.Now().Add(60 * time.Second)
+
+			// Удаляем сообщение с полем сбора
+			deleteFieldMsg := tgbotapi.NewDeleteMessage(chatID, session.FieldMessageID)
+			h.requestAPI(deleteFieldMsg)
+
+			// Удаляем сообщение с информацией о сборе
+			deleteInfoMsg := tgbotapi.NewDeleteMessage(chatID, session.InfoMessageID)
+			h.requestAPI(deleteInfoMsg)
+
+			exhaustMsg := tgbotapi.NewMessage(chatID, `⚠️ Ягодные кусты истощены! Необходимо подождать 1 минуту до восстановления.
+Нажми кнопку "🌿 Сбор" чтобы проверить готовность.`)
+			h.sendForestKeyboard(exhaustMsg)
+
+			// Удаляем сессию
+			delete(h.gatheringSessions, userID)
+		}
+	}
+}
+
+func (h *BotHandlers) updateGatheringField(chatID int64, field [][]string, messageID int) {
+	text := "Выберите ресурс для сбора:"
+
+	// Создаем инлайн клавиатуру на основе переданного поля
+	var keyboard [][]tgbotapi.InlineKeyboardButton
+	for i := 0; i < 3; i++ {
+		var row []tgbotapi.InlineKeyboardButton
+		for j := 0; j < 3; j++ {
+			cell := field[i][j]
+			var callbackData string
+
+			switch cell {
+			case "🍇":
+				callbackData = fmt.Sprintf("gathering_berry_%d_%d", i, j)
+			default:
+				callbackData = fmt.Sprintf("gathering_empty_%d_%d", i, j)
+				cell = " "
+			}
+
+			button := tgbotapi.NewInlineKeyboardButtonData(cell, callbackData)
+			row = append(row, button)
+		}
+		keyboard = append(keyboard, row)
+	}
+
+	// Редактируем существующее сообщение вместо отправки нового
+	editMsg := tgbotapi.NewEditMessageTextAndMarkup(chatID, messageID, text, tgbotapi.NewInlineKeyboardMarkup(keyboard...))
+	h.editMessage(editMsg)
+}
+
+func (h *BotHandlers) updateGatheringInfoMessage(userID int64, chatID int64, gathering *models.Gathering, messageID int) {
+	// Вычисляем опыт до следующего уровня
+	expToNext := (gathering.Level * 100) - gathering.Experience
+
+	infoText := fmt.Sprintf(`🌿 Сбор (Уровень %d)
+До следующего уровня: %d опыта
+
+Доступные ресурсы:
+🍇 Ягоды`, gathering.Level, expToNext)
+
+	// Удаляем старое сообщение
+	deleteMsg := tgbotapi.NewDeleteMessage(chatID, messageID)
+	h.requestAPI(deleteMsg)
+
+	// Создаем новое сообщение с клавиатурой
+	gatheringKeyboard := tgbotapi.NewReplyKeyboard(
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton("◀️ Назад"),
+		),
+	)
+	gatheringKeyboard.ResizeKeyboard = true
+
+	newMsg := tgbotapi.NewMessage(chatID, infoText)
+	newMsg.ReplyMarkup = gatheringKeyboard
+	newResponse, _ := h.sendMessageWithResponse(newMsg)
+
+	// Обновляем ID сообщения в сессии
+	if session, exists := h.gatheringSessions[userID]; exists {
+		session.InfoMessageID = newResponse.MessageID
+	}
 }

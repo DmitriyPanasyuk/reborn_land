@@ -71,6 +71,15 @@ type Forest struct {
 	IsExhausted bool      `json:"is_exhausted"`
 }
 
+type Gathering struct {
+	ID          int       `json:"id"`
+	PlayerID    int       `json:"player_id"`
+	Level       int       `json:"level"`
+	Experience  int       `json:"experience"`
+	LastUsed    time.Time `json:"last_used"`
+	IsExhausted bool      `json:"is_exhausted"`
+}
+
 type ForestSession struct {
 	PlayerID        int64      `json:"player_id"`
 	Resources       [][]string `json:"resources"` // 3x3 массив ресурсов
@@ -80,4 +89,15 @@ type ForestSession struct {
 	FieldMessageID  int        `json:"field_message_id"`  // ID сообщения с полем леса
 	InfoMessageID   int        `json:"info_message_id"`   // ID сообщения с информацией о лесе
 	ResultMessageID int        `json:"result_message_id"` // ID сообщения с результатом рубки
+}
+
+type GatheringSession struct {
+	PlayerID        int64      `json:"player_id"`
+	Resources       [][]string `json:"resources"` // 3x3 массив ресурсов
+	IsActive        bool       `json:"is_active"`
+	IsGathering     bool       `json:"is_gathering"`
+	StartedAt       time.Time  `json:"started_at"`
+	FieldMessageID  int        `json:"field_message_id"`  // ID сообщения с полем сбора
+	InfoMessageID   int        `json:"info_message_id"`   // ID сообщения с информацией о сборе
+	ResultMessageID int        `json:"result_message_id"` // ID сообщения с результатом сбора
 }
