@@ -161,6 +161,8 @@ func (h *BotHandlers) handleMessage(message *tgbotapi.Message) {
 		h.handleReadPage3(message)
 	case "/read4":
 		h.handleReadPage4(message)
+	case "/read5":
+		h.handleReadPage5(message)
 	default:
 		// Неизвестная команда
 		msg := tgbotapi.NewMessage(message.Chat.ID, "Неизвестная команда. Используйте /start для начала игры.")
@@ -1419,6 +1421,9 @@ func (h *BotHandlers) completeHunting(userID int64, chatID int64, resourceName s
 	if session, exists := h.huntingSessions[userID]; exists {
 		session.ResultMessageID = messageID
 	}
+
+	// Проверяем прогресс квеста 5 (первая охота)
+	h.checkHuntingQuestProgress(userID, chatID, player.ID)
 }
 
 func (h *BotHandlers) updateHuntingField(chatID int64, field [][]string, messageID int) {
@@ -3122,13 +3127,104 @@ func (h *BotHandlers) handleLore(message *tgbotapi.Message) {
 				}
 
 				if quest4.Status == "completed" {
-					// Все квесты выполнены, показываем заглушку
-					msg := tgbotapi.NewMessage(message.Chat.ID, "Цепочка квестов в разработке.")
-					h.sendMessage(msg)
-					return
+					// Квест 4 выполнен, проверяем квест 5
+					quest5, err := h.db.GetPlayerQuest(player.ID, 5)
+					if err != nil {
+						log.Printf("Error getting quest 5: %v", err)
+						msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка при получении квеста.")
+						h.sendMessage(msg)
+						return
+					}
+					if quest5 == nil || quest5.Status == "available" {
+						// Квест 5 еще не создан или доступен для принятия
+						if quest5 == nil {
+							// Создаем квест 5, если его нет
+							err := h.db.CreateQuest(player.ID, 5, 1) // Квест 5: совершить первую охоту
+							if err != nil {
+								log.Printf("Error creating quest 5: %v", err)
+								msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка при создании квеста.")
+								h.sendMessage(msg)
+								return
+							}
+						}
+						// Показываем предложение квеста 5
+						questText := `🎯 Квест 5: Звериный взгляд
+Задание: Соверши первую охоту
+Награда: 🎖 10 опыта + 📖 Страница 5 «След древних»`
+						msg := tgbotapi.NewMessage(message.Chat.ID, questText)
+						acceptBtn := tgbotapi.NewInlineKeyboardButtonData("Принять", "quest_accept_5")
+						declineBtn := tgbotapi.NewInlineKeyboardButtonData("Отказ", "quest_decline_5")
+						keyboard := tgbotapi.NewInlineKeyboardMarkup(
+							tgbotapi.NewInlineKeyboardRow(acceptBtn, declineBtn),
+						)
+						msg.ReplyMarkup = keyboard
+						h.sendMessage(msg)
+						return
+					}
+					if quest5.Status == "active" {
+						activeText := fmt.Sprintf(`Активный квест: 🎯 Квест 5: Звериный взгляд
+Задание: Соверши первую охоту (%d/1)
+Награда: 🎖 10 опыта + 📖 Страница 5 «След древних»`, quest5.Progress)
+						msg := tgbotapi.NewMessage(message.Chat.ID, activeText)
+						h.sendMessage(msg)
+						return
+					}
+					if quest5.Status == "completed" {
+						msg := tgbotapi.NewMessage(message.Chat.ID, "🎉 Ты завершил всю цепочку ЛОР-квестов! Продолжение следует...")
+						h.sendMessage(msg)
+						return
+					}
 				}
 			}
 		}
+	}
+
+	// Квест 4 выполнен, проверяем квест 5
+	quest5, err := h.db.GetPlayerQuest(player.ID, 5)
+	if err != nil {
+		log.Printf("Error getting quest 5: %v", err)
+		msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка при получении квеста.")
+		h.sendMessage(msg)
+		return
+	}
+	if quest5 == nil || quest5.Status == "available" {
+		// Квест 5 еще не создан или доступен для принятия
+		if quest5 == nil {
+			// Создаем квест 5, если его нет
+			err := h.db.CreateQuest(player.ID, 5, 1) // Квест 5: совершить первую охоту
+			if err != nil {
+				log.Printf("Error creating quest 5: %v", err)
+				msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка при создании квеста.")
+				h.sendMessage(msg)
+				return
+			}
+		}
+		// Показываем предложение квеста 5
+		questText := `🎯 Квест 5: Звериный взгляд
+Задание: Соверши первую охоту
+Награда: 🎖 10 опыта + 📖 Страница 5 «След древних»`
+		msg := tgbotapi.NewMessage(message.Chat.ID, questText)
+		acceptBtn := tgbotapi.NewInlineKeyboardButtonData("Принять", "quest_accept_5")
+		declineBtn := tgbotapi.NewInlineKeyboardButtonData("Отказ", "quest_decline_5")
+		keyboard := tgbotapi.NewInlineKeyboardMarkup(
+			tgbotapi.NewInlineKeyboardRow(acceptBtn, declineBtn),
+		)
+		msg.ReplyMarkup = keyboard
+		h.sendMessage(msg)
+		return
+	}
+	if quest5.Status == "active" {
+		activeText := fmt.Sprintf(`Активный квест: 🎯 Квест 5: Звериный взгляд
+Задание: Соверши первую охоту (%d/1)
+Награда: 🎖 10 опыта + 📖 Страница 5 «След древних»`, quest5.Progress)
+		msg := tgbotapi.NewMessage(message.Chat.ID, activeText)
+		h.sendMessage(msg)
+		return
+	}
+	if quest5.Status == "completed" {
+		msg := tgbotapi.NewMessage(message.Chat.ID, "🎉 Ты завершил всю цепочку ЛОР-квестов! Продолжение следует...")
+		h.sendMessage(msg)
+		return
 	}
 }
 
@@ -3182,12 +3278,14 @@ func (h *BotHandlers) handleLookPages(message *tgbotapi.Message) {
 			pageMap[3] = fmt.Sprintf("%s - %d шт. /read3", item.ItemName, item.Quantity)
 		} else if strings.Contains(item.ItemName, "📖 Страница 4") {
 			pageMap[4] = fmt.Sprintf("%s - %d шт. /read4", item.ItemName, item.Quantity)
+		} else if strings.Contains(item.ItemName, "📖 Страница 5") {
+			pageMap[5] = fmt.Sprintf("%s - %d шт. /read5", item.ItemName, item.Quantity)
 		}
 	}
 
 	// Создаем отсортированный список страниц
 	var pages []string
-	for i := 1; i <= 4; i++ {
+	for i := 1; i <= 5; i++ {
 		if page, exists := pageMap[i]; exists {
 			pages = append(pages, page)
 		}
@@ -3259,11 +3357,19 @@ func (h *BotHandlers) handleReadPage(message *tgbotapi.Message) {
 
 "У тебя ничего нет. Ни дома, ни имени, ни цели. Только старая кирка, тёплый свет солнца и бескрайняя, живая земля, что будто наблюдает за каждым твоим шагом."`
 		}
+		if strings.Contains(item.ItemName, "📖 Страница 5") && item.Quantity > 0 {
+			pageMap[5] = "📖 Страница 5 «След древних»"
+			pageTexts["📖 Страница 5 «След древних»"] = `📖 Страница 5 «След древних»
+
+"Но ты чувствуешь — если построить хижину, зажечь огонь, добыть первый камень… что-то изменится.
+В тебе. В этом месте. В самой памяти мира.
+Возможно, ты не просто выживший. Возможно, ты — начало нового."`
+		}
 	}
 
 	// Создаем отсортированный список страниц
 	var availablePages []string
-	for i := 1; i <= 4; i++ {
+	for i := 1; i <= 5; i++ {
 		if page, exists := pageMap[i]; exists {
 			availablePages = append(availablePages, page)
 		}
@@ -3437,6 +3543,43 @@ func (h *BotHandlers) handleReadPage4(message *tgbotapi.Message) {
 
 "У тебя ничего нет. Ни дома, ни имени, ни цели. Только старая кирка, тёплый свет солнца и бескрайняя, живая земля, что будто наблюдает за каждым твоим шагом."`
 
+	msg := tgbotapi.NewMessage(message.Chat.ID, pageText)
+	h.sendMessage(msg)
+}
+
+func (h *BotHandlers) handleReadPage5(message *tgbotapi.Message) {
+	userID := message.From.ID
+	player, err := h.db.GetPlayer(userID)
+	if err != nil {
+		log.Printf("Error getting player: %v", err)
+		msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка. Попробуйте позже.")
+		h.sendMessage(msg)
+		return
+	}
+	inventory, err := h.db.GetPlayerInventory(player.ID)
+	if err != nil {
+		log.Printf("Error getting inventory: %v", err)
+		msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка. Попробуйте позже.")
+		h.sendMessage(msg)
+		return
+	}
+	found := false
+	for _, item := range inventory {
+		if strings.Contains(item.ItemName, "📖 Страница 5") && item.Quantity > 0 {
+			found = true
+			break
+		}
+	}
+	if !found {
+		msg := tgbotapi.NewMessage(message.Chat.ID, "У вас нет этой страницы.")
+		h.sendMessage(msg)
+		return
+	}
+	pageText := `📖 Страница 5 «След древних»
+
+"Но ты чувствуешь — если построить хижину, зажечь огонь, добыть первый камень… что-то изменится.
+В тебе. В этом месте. В самой памяти мира.
+Возможно, ты не просто выживший. Возможно, ты — начало нового."`
 	msg := tgbotapi.NewMessage(message.Chat.ID, pageText)
 	h.sendMessage(msg)
 }
@@ -4078,6 +4221,59 @@ func (h *BotHandlers) checkBerryQuestProgress(userID int64, chatID int64, player
 🎖 10 опыта
 📖 Страница 4 «Голос земли»`
 
+		msg := tgbotapi.NewMessage(chatID, questCompleteText)
+		h.sendMessage(msg)
+	}
+}
+
+func (h *BotHandlers) checkHuntingQuestProgress(userID int64, chatID int64, playerID int) {
+	// Проверяем активный квест 5 (первая охота)
+	quest, err := h.db.GetPlayerQuest(playerID, 5)
+	if err != nil {
+		log.Printf("Error getting quest 5: %v", err)
+		return
+	}
+
+	// Если квест не активен, ничего не делаем
+	if quest == nil || quest.Status != "active" {
+		return
+	}
+
+	// Увеличиваем прогресс квеста
+	newProgress := quest.Progress + 1
+	err = h.db.UpdateQuestProgress(playerID, 5, newProgress)
+	if err != nil {
+		log.Printf("Error updating quest 5 progress: %v", err)
+		return
+	}
+
+	// Проверяем, выполнен ли квест
+	if newProgress >= 1 {
+		// Квест выполнен!
+		err = h.db.UpdateQuestStatus(playerID, 5, "completed")
+		if err != nil {
+			log.Printf("Error completing quest 5: %v", err)
+			return
+		}
+
+		// Добавляем награды
+		// 10 опыта игроку
+		err = h.db.UpdatePlayerExperience(playerID, 10)
+		if err != nil {
+			log.Printf("Error updating player experience: %v", err)
+		}
+
+		// Добавляем страницу 5 в инвентарь
+		err = h.db.AddItemToInventory(playerID, "📖 Страница 5 «След древних»", 1)
+		if err != nil {
+			log.Printf("Error adding quest item to inventory: %v", err)
+		}
+
+		// Отправляем сообщение о выполнении квеста
+		questCompleteText := `🎯 Квест 5: Звериный взгляд ВЫПОЛНЕН!
+Получена награда:
+🎖 10 опыта
+📖 Страница 5 «След древних»`
 		msg := tgbotapi.NewMessage(chatID, questCompleteText)
 		h.sendMessage(msg)
 	}
