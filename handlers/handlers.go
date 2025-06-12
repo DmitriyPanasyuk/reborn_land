@@ -1658,6 +1658,11 @@ func (h *BotHandlers) completeMining(userID int64, chatID int64, resourceName st
 		log.Printf("Error adding item to inventory: %v", err)
 	}
 
+	// Проверяем квест на добычу камня
+	if resourceName == "Камень" {
+		h.checkStoneQuestProgress(userID, chatID, player.ID)
+	}
+
 	// Обновляем прочность кирки и сытость (при добыче игрок тратит энергию)
 	if err := h.db.UpdateItemDurability(player.ID, "Простая кирка", 1); err != nil {
 		log.Printf("Error updating item durability: %v", err)
@@ -2342,10 +2347,63 @@ func (h *BotHandlers) handleLore(message *tgbotapi.Message) {
 	}
 
 	if quest.Status == "completed" {
-		// Квест выполнен, показываем заглушку
-		msg := tgbotapi.NewMessage(message.Chat.ID, "Цепочка квестов в разработке.")
-		h.sendMessage(msg)
-		return
+		// Квест 1 выполнен, проверяем квест 2
+		quest2, err := h.db.GetPlayerQuest(player.ID, 2)
+		if err != nil {
+			log.Printf("Error getting quest 2: %v", err)
+			msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка при получении квеста.")
+			h.sendMessage(msg)
+			return
+		}
+
+		if quest2 == nil || quest2.Status == "available" {
+			// Квест 2 еще не создан или доступен для принятия
+			if quest2 == nil {
+				// Создаем квест 2, если его нет
+				err := h.db.CreateQuest(player.ID, 2, 3) // Квест 2: добыть 3 камня
+				if err != nil {
+					log.Printf("Error creating quest 2: %v", err)
+					msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка при создании квеста.")
+					h.sendMessage(msg)
+					return
+				}
+			}
+
+			// Показываем предложение квеста 2
+			questText := `⛏ Квест 2: Вглубь
+Задание: Добудь 3 камня
+Награда: 🎖 10 опыта + 📖 Страница 2 «Пыль веков»`
+
+			msg := tgbotapi.NewMessage(message.Chat.ID, questText)
+
+			// Создаем инлайн кнопки
+			acceptBtn := tgbotapi.NewInlineKeyboardButtonData("Принять", "quest_accept_2")
+			declineBtn := tgbotapi.NewInlineKeyboardButtonData("Отказ", "quest_decline_2")
+			keyboard := tgbotapi.NewInlineKeyboardMarkup(
+				tgbotapi.NewInlineKeyboardRow(acceptBtn, declineBtn),
+			)
+			msg.ReplyMarkup = keyboard
+			h.sendMessage(msg)
+			return
+		}
+
+		if quest2.Status == "active" {
+			// Квест 2 активен, показываем прогресс
+			activeText := fmt.Sprintf(`Активный квест: ⛏ Квест 2: Вглубь
+Задание: Добудь 3 камня (%d/3)
+Награда: 🎖 10 опыта + 📖 Страница 2 «Пыль веков»`, quest2.Progress)
+
+			msg := tgbotapi.NewMessage(message.Chat.ID, activeText)
+			h.sendMessage(msg)
+			return
+		}
+
+		if quest2.Status == "completed" {
+			// Квест 2 тоже выполнен, показываем заглушку
+			msg := tgbotapi.NewMessage(message.Chat.ID, "Цепочка квестов в разработке.")
+			h.sendMessage(msg)
+			return
+		}
 	}
 }
 
@@ -2823,6 +2881,60 @@ func (h *BotHandlers) checkBirchQuestProgress(userID int64, chatID int64, player
 Получена награда:
 🎖 10 опыта
 📖 Страница 1 «Забытая тишина»`
+
+		msg := tgbotapi.NewMessage(chatID, questCompleteText)
+		h.sendMessage(msg)
+	}
+}
+
+func (h *BotHandlers) checkStoneQuestProgress(userID int64, chatID int64, playerID int) {
+	// Проверяем активный квест 2 (добыча камня)
+	quest, err := h.db.GetPlayerQuest(playerID, 2)
+	if err != nil {
+		log.Printf("Error getting quest 2: %v", err)
+		return
+	}
+
+	// Если квест не активен, ничего не делаем
+	if quest == nil || quest.Status != "active" {
+		return
+	}
+
+	// Увеличиваем прогресс квеста
+	newProgress := quest.Progress + 1
+	err = h.db.UpdateQuestProgress(playerID, 2, newProgress)
+	if err != nil {
+		log.Printf("Error updating quest 2 progress: %v", err)
+		return
+	}
+
+	// Проверяем, выполнен ли квест
+	if newProgress >= quest.Target {
+		// Квест выполнен!
+		err = h.db.UpdateQuestStatus(playerID, 2, "completed")
+		if err != nil {
+			log.Printf("Error completing quest 2: %v", err)
+			return
+		}
+
+		// Добавляем награды
+		// 10 опыта игроку
+		err = h.db.UpdatePlayerExperience(playerID, 10)
+		if err != nil {
+			log.Printf("Error updating player experience: %v", err)
+		}
+
+		// Добавляем страницу в инвентарь
+		err = h.db.AddItemToInventory(playerID, "📖 Страница 2 «Пыль веков»", 1)
+		if err != nil {
+			log.Printf("Error adding quest item to inventory: %v", err)
+		}
+
+		// Отправляем сообщение о выполнении квеста
+		questCompleteText := `⛏ Квест 2: Вглубь ВЫПОЛНЕН!
+Получена награда:
+🎖 10 опыта
+📖 Страница 2 «Пыль веков»`
 
 		msg := tgbotapi.NewMessage(chatID, questCompleteText)
 		h.sendMessage(msg)
