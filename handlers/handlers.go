@@ -14,36 +14,40 @@ import (
 )
 
 type BotHandlers struct {
-	bot                *tgbotapi.BotAPI
-	db                 *database.DB
-	waitingForName     map[int64]bool
-	mineSessions       map[int64]*models.MineSession
-	forestSessions     map[int64]*models.ForestSession
-	gatheringSessions  map[int64]*models.GatheringSession
-	miningTimers       map[int64]*time.Timer
-	choppingTimers     map[int64]*time.Timer
-	gatheringTimers    map[int64]*time.Timer
-	mineCooldowns      map[int64]time.Time // Время окончания кулдауна шахты
-	forestCooldowns    map[int64]time.Time // Время окончания кулдауна леса
-	gatheringCooldowns map[int64]time.Time // Время окончания кулдауна сбора
-	playerLocation     map[int64]string    // Текущее местоположение игрока
+	bot                     *tgbotapi.BotAPI
+	db                      *database.DB
+	waitingForName          map[int64]bool
+	waitingForCraftQuantity map[int64]string // Ожидание количества для крафта (значение - название предмета)
+	mineSessions            map[int64]*models.MineSession
+	forestSessions          map[int64]*models.ForestSession
+	gatheringSessions       map[int64]*models.GatheringSession
+	miningTimers            map[int64]*time.Timer
+	choppingTimers          map[int64]*time.Timer
+	gatheringTimers         map[int64]*time.Timer
+	craftingTimers          map[int64]*time.Timer // Таймеры для крафта
+	mineCooldowns           map[int64]time.Time   // Время окончания кулдауна шахты
+	forestCooldowns         map[int64]time.Time   // Время окончания кулдауна леса
+	gatheringCooldowns      map[int64]time.Time   // Время окончания кулдауна сбора
+	playerLocation          map[int64]string      // Текущее местоположение игрока
 }
 
 func New(bot *tgbotapi.BotAPI, db *database.DB) *BotHandlers {
 	return &BotHandlers{
-		bot:                bot,
-		db:                 db,
-		waitingForName:     make(map[int64]bool),
-		mineSessions:       make(map[int64]*models.MineSession),
-		forestSessions:     make(map[int64]*models.ForestSession),
-		gatheringSessions:  make(map[int64]*models.GatheringSession),
-		miningTimers:       make(map[int64]*time.Timer),
-		choppingTimers:     make(map[int64]*time.Timer),
-		gatheringTimers:    make(map[int64]*time.Timer),
-		mineCooldowns:      make(map[int64]time.Time),
-		forestCooldowns:    make(map[int64]time.Time),
-		gatheringCooldowns: make(map[int64]time.Time),
-		playerLocation:     make(map[int64]string),
+		bot:                     bot,
+		db:                      db,
+		waitingForName:          make(map[int64]bool),
+		waitingForCraftQuantity: make(map[int64]string),
+		mineSessions:            make(map[int64]*models.MineSession),
+		forestSessions:          make(map[int64]*models.ForestSession),
+		gatheringSessions:       make(map[int64]*models.GatheringSession),
+		miningTimers:            make(map[int64]*time.Timer),
+		choppingTimers:          make(map[int64]*time.Timer),
+		gatheringTimers:         make(map[int64]*time.Timer),
+		craftingTimers:          make(map[int64]*time.Timer),
+		mineCooldowns:           make(map[int64]time.Time),
+		forestCooldowns:         make(map[int64]time.Time),
+		gatheringCooldowns:      make(map[int64]time.Time),
+		playerLocation:          make(map[int64]string),
 	}
 }
 
@@ -62,6 +66,19 @@ func (h *BotHandlers) handleMessage(message *tgbotapi.Message) {
 	// Проверяем, ждем ли мы от пользователя имя
 	if h.waitingForName[userID] {
 		h.handleNameInput(message)
+		return
+	}
+
+	// Проверяем, ждем ли мы количество для крафта
+	if itemName, exists := h.waitingForCraftQuantity[userID]; exists {
+		h.handleCraftQuantityInput(message, itemName)
+		return
+	}
+
+	// Проверяем, идет ли крафт
+	if _, exists := h.craftingTimers[userID]; exists {
+		msg := tgbotapi.NewMessage(message.Chat.ID, "Нельзя совершать действия пока идет создание предметов.")
+		h.sendMessage(msg)
 		return
 	}
 
@@ -256,6 +273,53 @@ func (h *BotHandlers) handleNameInput(message *tgbotapi.Message) {
 
 	msg := tgbotapi.NewMessage(message.Chat.ID, successText)
 	h.sendWithKeyboard(msg)
+}
+
+func (h *BotHandlers) handleCraftQuantityInput(message *tgbotapi.Message, itemName string) {
+	userID := message.From.ID
+	quantityStr := strings.TrimSpace(message.Text)
+
+	// Проверяем, что введено число
+	quantity, err := strconv.Atoi(quantityStr)
+	if err != nil || quantity <= 0 {
+		msg := tgbotapi.NewMessage(message.Chat.ID, "Введите корректное количество (положительное число):")
+		h.sendMessage(msg)
+		return
+	}
+
+	// Получаем игрока
+	player, err := h.db.GetPlayer(userID)
+	if err != nil {
+		log.Printf("Error getting player: %v", err)
+		msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка. Попробуйте позже.")
+		h.sendMessage(msg)
+		return
+	}
+
+	// Проверяем количество березы в инвентаре для березового бруса
+	if itemName == "Березовый брус" {
+		birchQuantity, err := h.db.GetItemQuantityInInventory(player.ID, "Береза")
+		if err != nil {
+			log.Printf("Error getting birch quantity: %v", err)
+			birchQuantity = 0
+		}
+
+		// Для березового бруса нужно 2 березы за 1 брус
+		requiredBirch := quantity * 2
+		if birchQuantity < requiredBirch {
+			msg := tgbotapi.NewMessage(message.Chat.ID, `Недостаточно предмета "Береза".`)
+			h.sendMessage(msg)
+			// Убираем флаг ожидания количества
+			delete(h.waitingForCraftQuantity, userID)
+			return
+		}
+
+		// Начинаем крафт
+		h.startCrafting(userID, message.Chat.ID, itemName, quantity)
+	}
+
+	// Убираем флаг ожидания количества
+	delete(h.waitingForCraftQuantity, userID)
 }
 
 func (h *BotHandlers) handleProfile(message *tgbotapi.Message) {
@@ -1194,7 +1258,47 @@ func (h *BotHandlers) handleCreateFishingRod(message *tgbotapi.Message) {
 }
 
 func (h *BotHandlers) handleCreateBirchPlank(message *tgbotapi.Message) {
-	h.showRecipe(message, "Березовый брус")
+	userID := message.From.ID
+
+	// Получаем игрока
+	player, err := h.db.GetPlayer(userID)
+	if err != nil {
+		log.Printf("Error getting player: %v", err)
+		msg := tgbotapi.NewMessage(message.Chat.ID, "Сначала зарегистрируйтесь с помощью команды /start")
+		h.sendMessage(msg)
+		return
+	}
+
+	// Проверяем количество березы в инвентаре
+	birchQuantity, err := h.db.GetItemQuantityInInventory(player.ID, "Береза")
+	if err != nil {
+		log.Printf("Error getting birch quantity: %v", err)
+		birchQuantity = 0
+	}
+
+	// Показываем рецепт с кнопкой
+	recipeText := fmt.Sprintf(`Для изготовления предмета "Березовый брус" необходимо следующее:
+Береза - %d/%d шт.`, birchQuantity, 2)
+
+	// Проверяем, можно ли создать хотя бы один предмет
+	canCraft := birchQuantity >= 2
+	var buttonText string
+	if canCraft {
+		buttonText = "Создать ✅"
+	} else {
+		buttonText = "Создать ❌"
+	}
+
+	msg := tgbotapi.NewMessage(message.Chat.ID, recipeText)
+
+	// Создаем инлайн клавиатуру с кнопкой создать
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(buttonText, "craft_Березовый брус"),
+		),
+	)
+	msg.ReplyMarkup = keyboard
+	h.sendMessage(msg)
 }
 
 func (h *BotHandlers) handleCreateSimpleHut(message *tgbotapi.Message) {
@@ -1360,11 +1464,57 @@ func (h *BotHandlers) handleCallbackQuery(callback *tgbotapi.CallbackQuery) {
 		// Пустая ячейка
 		callbackConfig := tgbotapi.NewCallback(callback.ID, "Здесь нет ягод!")
 		h.requestAPI(callbackConfig)
+	} else if strings.HasPrefix(data, "craft_") {
+		// Обрабатываем крафт
+		itemName := strings.TrimPrefix(data, "craft_")
+		h.handleCraftCallback(userID, callback.Message.Chat.ID, itemName, callback.ID)
 	} else {
-		// Остальные callback (крафт и т.д.)
-		msg := tgbotapi.NewMessage(callback.Message.Chat.ID, "🔨 Функция создания предметов пока в разработке...")
+		// Остальные callback
+		msg := tgbotapi.NewMessage(callback.Message.Chat.ID, "🔨 Функция пока в разработке...")
 		h.sendMessage(msg)
 		callbackConfig := tgbotapi.NewCallback(callback.ID, "")
+		h.requestAPI(callbackConfig)
+	}
+}
+
+func (h *BotHandlers) handleCraftCallback(userID int64, chatID int64, itemName string, callbackID string) {
+	// Получаем игрока
+	player, err := h.db.GetPlayer(userID)
+	if err != nil {
+		log.Printf("Error getting player: %v", err)
+		callbackConfig := tgbotapi.NewCallback(callbackID, "Ошибка получения данных игрока")
+		h.requestAPI(callbackConfig)
+		return
+	}
+
+	// Обрабатываем крафт березового бруса
+	if itemName == "Березовый брус" {
+		// Проверяем количество березы
+		birchQuantity, err := h.db.GetItemQuantityInInventory(player.ID, "Береза")
+		if err != nil {
+			log.Printf("Error getting birch quantity: %v", err)
+			birchQuantity = 0
+		}
+
+		if birchQuantity < 2 {
+			callbackConfig := tgbotapi.NewCallback(callbackID, `Недостаточно предмета "Береза"`)
+			h.requestAPI(callbackConfig)
+			return
+		}
+
+		// Отвечаем на callback
+		callbackConfig := tgbotapi.NewCallback(callbackID, "")
+		h.requestAPI(callbackConfig)
+
+		// Спрашиваем количество
+		msg := tgbotapi.NewMessage(chatID, "Введи сколько предметов хочешь создать:")
+		h.sendMessage(msg)
+
+		// Отмечаем, что ждем количество для крафта
+		h.waitingForCraftQuantity[userID] = itemName
+	} else {
+		// Для других предметов пока заглушка
+		callbackConfig := tgbotapi.NewCallback(callbackID, "Функция пока в разработке")
 		h.requestAPI(callbackConfig)
 	}
 }
@@ -1377,7 +1527,7 @@ func (h *BotHandlers) startMiningAtPosition(userID int64, chatID int64, resource
 }
 
 func (h *BotHandlers) startMining(userID int64, chatID int64, resourceName string, duration int, callbackID string, row, col int) {
-	// Проверяем, идет ли уже добыча в шахте или рубка в лесу
+	// Проверяем, идет ли уже добыча в шахте, рубка в лесу или крафт
 	if _, exists := h.miningTimers[userID]; exists {
 		msg := tgbotapi.NewMessage(chatID, "Нельзя начинать новую добычу, пока не закончена текущая.")
 		h.sendMessage(msg)
@@ -1387,6 +1537,13 @@ func (h *BotHandlers) startMining(userID int64, chatID int64, resourceName strin
 	}
 	if _, exists := h.choppingTimers[userID]; exists {
 		msg := tgbotapi.NewMessage(chatID, "Нельзя начинать новую добычу, пока не закончена текущая.")
+		h.sendMessage(msg)
+		callbackConfig := tgbotapi.NewCallback(callbackID, "")
+		h.requestAPI(callbackConfig)
+		return
+	}
+	if _, exists := h.craftingTimers[userID]; exists {
+		msg := tgbotapi.NewMessage(chatID, "Нельзя совершать действия пока идет создание предметов.")
 		h.sendMessage(msg)
 		callbackConfig := tgbotapi.NewCallback(callbackID, "")
 		h.requestAPI(callbackConfig)
@@ -1756,7 +1913,7 @@ func (h *BotHandlers) startChoppingAtPosition(userID int64, chatID int64, resour
 }
 
 func (h *BotHandlers) startChopping(userID int64, chatID int64, resourceName string, duration int, callbackID string, row, col int) {
-	// Проверяем, идет ли уже рубка в лесу или добыча в шахте
+	// Проверяем, идет ли уже рубка в лесу, добыча в шахте или крафт
 	if _, exists := h.choppingTimers[userID]; exists {
 		msg := tgbotapi.NewMessage(chatID, "Нельзя начинать новую добычу, пока не закончена текущая.")
 		h.sendMessage(msg)
@@ -1766,6 +1923,13 @@ func (h *BotHandlers) startChopping(userID int64, chatID int64, resourceName str
 	}
 	if _, exists := h.miningTimers[userID]; exists {
 		msg := tgbotapi.NewMessage(chatID, "Нельзя начинать новую добычу, пока не закончена текущая.")
+		h.sendMessage(msg)
+		callbackConfig := tgbotapi.NewCallback(callbackID, "")
+		h.requestAPI(callbackConfig)
+		return
+	}
+	if _, exists := h.craftingTimers[userID]; exists {
+		msg := tgbotapi.NewMessage(chatID, "Нельзя совершать действия пока идет создание предметов.")
 		h.sendMessage(msg)
 		callbackConfig := tgbotapi.NewCallback(callbackID, "")
 		h.requestAPI(callbackConfig)
@@ -2087,7 +2251,7 @@ func (h *BotHandlers) startGatheringAtPosition(userID int64, chatID int64, resou
 }
 
 func (h *BotHandlers) startGathering(userID int64, chatID int64, resourceName string, duration int, callbackID string, row, col int) {
-	// Проверяем, идет ли уже сбор или добыча/рубка
+	// Проверяем, идет ли уже сбор, добыча/рубка или крафт
 	if _, exists := h.gatheringTimers[userID]; exists {
 		msg := tgbotapi.NewMessage(chatID, "Нельзя начинать новую добычу, пока не закончена текущая.")
 		h.sendMessage(msg)
@@ -2104,6 +2268,13 @@ func (h *BotHandlers) startGathering(userID int64, chatID int64, resourceName st
 	}
 	if _, exists := h.choppingTimers[userID]; exists {
 		msg := tgbotapi.NewMessage(chatID, "Нельзя начинать новую добычу, пока не закончена текущая.")
+		h.sendMessage(msg)
+		callbackConfig := tgbotapi.NewCallback(callbackID, "")
+		h.requestAPI(callbackConfig)
+		return
+	}
+	if _, exists := h.craftingTimers[userID]; exists {
+		msg := tgbotapi.NewMessage(chatID, "Нельзя совершать действия пока идет создание предметов.")
 		h.sendMessage(msg)
 		callbackConfig := tgbotapi.NewCallback(callbackID, "")
 		h.requestAPI(callbackConfig)
@@ -2365,4 +2536,110 @@ func (h *BotHandlers) updateGatheringInfoMessage(userID int64, chatID int64, gat
 	if session, exists := h.gatheringSessions[userID]; exists {
 		session.InfoMessageID = newResponse.MessageID
 	}
+}
+
+func (h *BotHandlers) startCrafting(userID int64, chatID int64, itemName string, quantity int) {
+	// Получаем игрока
+	player, err := h.db.GetPlayer(userID)
+	if err != nil {
+		log.Printf("Error getting player: %v", err)
+		return
+	}
+
+	// Для березового бруса: потребляем березу (2 березы за 1 брус)
+	if itemName == "Березовый брус" {
+		requiredBirch := quantity * 2
+		err := h.db.ConsumeItem(player.ID, "Береза", requiredBirch)
+		if err != nil {
+			log.Printf("Error consuming birch: %v", err)
+			msg := tgbotapi.NewMessage(chatID, "Произошла ошибка при потреблении ресурсов.")
+			h.sendMessage(msg)
+			return
+		}
+	}
+
+	// Вычисляем общее время крафта (20 секунд за один предмет)
+	totalDuration := quantity * 20
+
+	// Отправляем сообщение о начале крафта
+	craftText := fmt.Sprintf(`Идет создание предмета "%s". Время создания %d сек.
+
+⏳ 0%%`, itemName, totalDuration)
+
+	msg := tgbotapi.NewMessage(chatID, craftText)
+	response, err := h.sendMessageWithResponse(msg)
+	if err != nil {
+		log.Printf("Error sending craft message: %v", err)
+		return
+	}
+
+	// Запускаем таймер крафта
+	h.craftingTimers[userID] = time.NewTimer(time.Duration(totalDuration) * time.Second)
+
+	// Запускаем горутину для обновления прогресса
+	go h.updateCraftingProgress(userID, chatID, response.MessageID, itemName, quantity, totalDuration)
+}
+
+func (h *BotHandlers) updateCraftingProgress(userID int64, chatID int64, messageID int, itemName string, quantity int, totalDuration int) {
+	startTime := time.Now()
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			elapsed := time.Since(startTime).Seconds()
+			progress := int(elapsed)
+
+			if progress >= totalDuration {
+				// Крафт завершен
+				h.completeCrafting(userID, chatID, itemName, quantity, messageID)
+				return
+			}
+
+			// Обновляем прогресс бар
+			percentage := int((elapsed / float64(totalDuration)) * 100)
+			progressBar := h.createProgressBar(progress, totalDuration)
+
+			newText := fmt.Sprintf(`Идет создание предмета "%s". Время создания %d сек.
+
+%s %d%%`, itemName, totalDuration, progressBar, percentage)
+
+			// Редактируем сообщение
+			editMsg := tgbotapi.NewEditMessageText(chatID, messageID, newText)
+			h.editMessage(editMsg)
+
+		case <-time.After(time.Duration(totalDuration+1) * time.Second):
+			// Таймаут на случай, если что-то пошло не так
+			return
+		}
+	}
+}
+
+func (h *BotHandlers) completeCrafting(userID int64, chatID int64, itemName string, quantity int, messageID int) {
+	// Получаем игрока
+	player, err := h.db.GetPlayer(userID)
+	if err != nil {
+		log.Printf("Error getting player: %v", err)
+		return
+	}
+
+	// Добавляем созданные предметы в инвентарь
+	if err := h.db.AddItemToInventory(player.ID, itemName, quantity); err != nil {
+		log.Printf("Error adding crafted items to inventory: %v", err)
+	}
+
+	// Удаляем сообщение о крафте
+	deleteMsg := tgbotapi.NewDeleteMessage(chatID, messageID)
+	h.requestAPI(deleteMsg)
+
+	// Показываем результат
+	resultText := fmt.Sprintf(`✅ Создание завершено!
+Получено: "%s" x%d`, itemName, quantity)
+
+	msg := tgbotapi.NewMessage(chatID, resultText)
+	h.sendMessage(msg)
+
+	// Убираем таймер
+	delete(h.craftingTimers, userID)
 }
