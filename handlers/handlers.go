@@ -165,6 +165,8 @@ func (h *BotHandlers) handleMessage(message *tgbotapi.Message) {
 		h.handleReadPage5(message)
 	case "/read6":
 		h.handleReadPage6(message)
+	case "/read7":
+		h.handleReadPage7(message)
 	default:
 		// Неизвестная команда
 		msg := tgbotapi.NewMessage(message.Chat.ID, "Неизвестная команда. Используйте /start для начала игры.")
@@ -445,14 +447,10 @@ func (h *BotHandlers) handleInventory(message *tgbotapi.Message) {
 }
 
 func (h *BotHandlers) handleEat(message *tgbotapi.Message) {
-	userID := message.From.ID
-
-	// Получаем игрока
-	player, err := h.db.GetPlayer(userID)
+	// Получаем информацию об игроке
+	player, err := h.db.GetPlayer(message.From.ID)
 	if err != nil {
 		log.Printf("Error getting player: %v", err)
-		msg := tgbotapi.NewMessage(message.Chat.ID, "Сначала зарегистрируйтесь с помощью команды /start")
-		h.sendMessage(msg)
 		return
 	}
 
@@ -460,8 +458,6 @@ func (h *BotHandlers) handleEat(message *tgbotapi.Message) {
 	inventory, err := h.db.GetPlayerInventory(player.ID)
 	if err != nil {
 		log.Printf("Error getting inventory: %v", err)
-		msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка при получении инвентаря.")
-		h.sendMessage(msg)
 		return
 	}
 
@@ -475,48 +471,89 @@ func (h *BotHandlers) handleEat(message *tgbotapi.Message) {
 	}
 
 	if berryItem == nil {
-		msg := tgbotapi.NewMessage(message.Chat.ID, "У вас нет ягод для употребления.")
+		msg := tgbotapi.NewMessage(message.Chat.ID, "У тебя нет ягод для еды!")
 		h.sendMessage(msg)
 		return
 	}
 
-	// Уменьшаем количество ягод в инвентаре
+	// Уменьшаем количество ягод
 	err = h.db.ConsumeItem(player.ID, "Лесная ягода", 1)
 	if err != nil {
-		log.Printf("Error consuming berry: %v", err)
-		msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка при употреблении ягоды.")
-		h.sendMessage(msg)
+		log.Printf("Error consuming berries: %v", err)
 		return
 	}
 
-	// Сохраняем текущую сытость для расчета реального прироста
-	oldSatiety := player.Satiety
-
-	// Увеличиваем сытость на 5
-	err = h.db.UpdatePlayerSatiety(player.ID, 5)
+	// Увеличиваем сытость
+	newSatiety := player.Satiety + 5
+	if newSatiety > 100 {
+		newSatiety = 100
+	}
+	err = h.db.UpdatePlayerSatiety(player.ID, newSatiety)
 	if err != nil {
 		log.Printf("Error updating satiety: %v", err)
-		msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка при обновлении сытости.")
-		h.sendMessage(msg)
 		return
 	}
 
-	// Получаем обновленные данные игрока
-	updatedPlayer, err := h.db.GetPlayer(userID)
-	if err != nil {
-		log.Printf("Error getting updated player: %v", err)
-		msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка при получении обновленных данных.")
-		h.sendMessage(msg)
-		return
-	}
-
-	// Вычисляем реальный прирост сытости
-	actualSatietyGain := updatedPlayer.Satiety - oldSatiety
-
-	// Отправляем сообщение об успешном употреблении
-	responseText := fmt.Sprintf("Съеден предмет \"Ягода\", сытость пополнена на %d ед.\nСытость: %d/100", actualSatietyGain, updatedPlayer.Satiety)
-	msg := tgbotapi.NewMessage(message.Chat.ID, responseText)
+	// Отправляем сообщение о съеденных ягодах
+	msg := tgbotapi.NewMessage(message.Chat.ID, fmt.Sprintf("Ты съел ягоды! Сытость: %d/100", newSatiety))
 	h.sendMessage(msg)
+
+	// Проверяем прогресс квеста 7
+	h.checkBerryEatingQuestProgress(message.From.ID, message.Chat.ID, player.ID)
+}
+
+func (h *BotHandlers) checkBerryEatingQuestProgress(userID int64, chatID int64, playerID int) {
+	// Проверяем активный квест 7 (съесть 3 ягоды)
+	quest, err := h.db.GetPlayerQuest(playerID, 7)
+	if err != nil {
+		log.Printf("Error getting quest 7: %v", err)
+		return
+	}
+
+	// Если квест не активен, ничего не делаем
+	if quest == nil || quest.Status != "active" {
+		return
+	}
+
+	// Увеличиваем прогресс квеста
+	newProgress := quest.Progress + 1
+	err = h.db.UpdateQuestProgress(playerID, 7, newProgress)
+	if err != nil {
+		log.Printf("Error updating quest 7 progress: %v", err)
+		return
+	}
+
+	// Проверяем, выполнен ли квест
+	if newProgress >= quest.Target {
+		// Квест выполнен!
+		err = h.db.UpdateQuestStatus(playerID, 7, "completed")
+		if err != nil {
+			log.Printf("Error completing quest 7: %v", err)
+			return
+		}
+
+		// Добавляем награды
+		// 10 опыта игроку
+		err = h.db.UpdatePlayerExperience(playerID, 10)
+		if err != nil {
+			log.Printf("Error updating player experience: %v", err)
+		}
+
+		// Добавляем страницу в инвентарь
+		err = h.db.AddItemToInventory(playerID, "📖 Страница 7 «Шёпот ветра»", 1)
+		if err != nil {
+			log.Printf("Error adding quest item to inventory: %v", err)
+		}
+
+		// Отправляем сообщение о выполнении квеста
+		questCompleteText := `🍇 Квест 7: Перекус ВЫПОЛНЕН!
+Получена награда:
+🎖 10 опыта
+📖 Страница 7 «Шёпот ветра»`
+
+		msg := tgbotapi.NewMessage(chatID, questCompleteText)
+		h.sendMessage(msg)
+	}
 }
 
 func (h *BotHandlers) handleGathering(message *tgbotapi.Message) {
@@ -2100,6 +2137,22 @@ func (h *BotHandlers) handleCallbackQuery(callback *tgbotapi.CallbackQuery) {
 	} else if strings.HasPrefix(data, "quest_decline_") {
 		// Отказ от квеста
 		h.handleQuestDecline(callback.Message.Chat.ID, callback.ID, callback.Message.MessageID)
+	} else if strings.HasPrefix(data, "quest_accept_6") {
+		// Принятие квеста 6
+		questIDStr := strings.TrimPrefix(data, "quest_accept_")
+		questID, _ := strconv.Atoi(questIDStr)
+		h.handleQuestAccept(userID, callback.Message.Chat.ID, questID, callback.ID, callback.Message.MessageID)
+	} else if strings.HasPrefix(data, "quest_decline_6") {
+		// Отказ от квеста 6
+		h.handleQuestDecline(callback.Message.Chat.ID, callback.ID, callback.Message.MessageID)
+	} else if strings.HasPrefix(data, "quest_accept_7") {
+		// Принятие квеста 7
+		questIDStr := strings.TrimPrefix(data, "quest_accept_")
+		questID, _ := strconv.Atoi(questIDStr)
+		h.handleQuestAccept(userID, callback.Message.Chat.ID, questID, callback.ID, callback.Message.MessageID)
+	} else if strings.HasPrefix(data, "quest_decline_7") {
+		// Отказ от квеста 7
+		h.handleQuestDecline(callback.Message.Chat.ID, callback.ID, callback.Message.MessageID)
 	} else {
 		// Остальные callback
 		msg := tgbotapi.NewMessage(callback.Message.Chat.ID, "🔨 Функция пока в разработке...")
@@ -3217,9 +3270,64 @@ func (h *BotHandlers) handleLore(message *tgbotapi.Message) {
 							return
 						}
 						if quest6.Status == "completed" {
-							msg := tgbotapi.NewMessage(message.Chat.ID, "🎉 Ты завершил всю цепочку ЛОР-квестов! Продолжение следует...")
-							h.sendMessage(msg)
-							return
+							// Квест 6 выполнен, проверяем квест 7
+							quest7, err := h.db.GetPlayerQuest(player.ID, 7)
+							if err != nil {
+								log.Printf("Error getting quest 7: %v", err)
+								msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка при получении квеста.")
+								h.sendMessage(msg)
+								return
+							}
+
+							if quest7 == nil || quest7.Status == "available" {
+								// Квест 7 еще не создан или доступен для принятия
+								if quest7 == nil {
+									// Создаем квест 7, если его нет
+									err := h.db.CreateQuest(player.ID, 7, 3) // Квест 7: съесть 3 ягоды
+									if err != nil {
+										log.Printf("Error creating quest 7: %v", err)
+										msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка при создании квеста.")
+										h.sendMessage(msg)
+										return
+									}
+								}
+
+								// Показываем предложение квеста 7
+								questText := `🍇 Квест 7: Перекус
+Задание: Съешь 3 лесные ягоды.
+Для выполнения квеста необходимо в инвентаре напротив предмета "Лесная ягода" выполнить команду eat.
+Награда: 🎖 10 опыта + 📖 Страница 7 «Шёпот ветра»`
+
+								msg := tgbotapi.NewMessage(message.Chat.ID, questText)
+
+								// Создаем инлайн кнопки
+								acceptBtn := tgbotapi.NewInlineKeyboardButtonData("Принять", "quest_accept_7")
+								declineBtn := tgbotapi.NewInlineKeyboardButtonData("Отказ", "quest_decline_7")
+								keyboard := tgbotapi.NewInlineKeyboardMarkup(
+									tgbotapi.NewInlineKeyboardRow(acceptBtn, declineBtn),
+								)
+								msg.ReplyMarkup = keyboard
+								h.sendMessage(msg)
+								return
+							}
+
+							if quest7.Status == "active" {
+								// Квест 7 активен, показываем прогресс
+								activeText := fmt.Sprintf(`Активный квест: 🍇 Квест 7: Перекус
+Задание: Съешь 3 лесные ягоды (%d/3)
+Для выполнения квеста необходимо в инвентаре напротив предмета "Лесная ягода" выполнить команду eat.
+Награда: 🎖 10 опыта + 📖 Страница 7 «Шёпот ветра»`, quest7.Progress)
+
+								msg := tgbotapi.NewMessage(message.Chat.ID, activeText)
+								h.sendMessage(msg)
+								return
+							}
+
+							if quest7.Status == "completed" {
+								msg := tgbotapi.NewMessage(message.Chat.ID, "🎉 Ты завершил всю цепочку ЛОР-квестов! Продолжение следует...")
+								h.sendMessage(msg)
+								return
+							}
 						}
 					}
 				}
@@ -3320,6 +3428,56 @@ func (h *BotHandlers) handleLore(message *tgbotapi.Message) {
 			return
 		}
 	}
+
+	// Квест 6 выполнен, проверяем квест 7
+	quest7, err := h.db.GetPlayerQuest(player.ID, 7)
+	if err != nil {
+		log.Printf("Error getting quest 7: %v", err)
+		msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка при получении квеста.")
+		h.sendMessage(msg)
+		return
+	}
+	if quest7 == nil || quest7.Status == "available" {
+		// Квест 7 еще не создан или доступен для принятия
+		if quest7 == nil {
+			// Создаем квест 7, если его нет
+			err := h.db.CreateQuest(player.ID, 7, 3) // Квест 7: съесть 3 ягоды
+			if err != nil {
+				log.Printf("Error creating quest 7: %v", err)
+				msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка при создании квеста.")
+				h.sendMessage(msg)
+				return
+			}
+		}
+		// Показываем предложение квеста 7
+		questText := `🍔 Квест 7: Перекус
+Задание: Съешь 3 ягоды
+Для выполнения квеста в инвентаре напротив Лесной ягоды выполнить команду eat.
+Награда: 🎖 10 опыта + 📖 Страница 7 «Шёпот ветра»`
+		msg := tgbotapi.NewMessage(message.Chat.ID, questText)
+		acceptBtn := tgbotapi.NewInlineKeyboardButtonData("Принять", "quest_accept_7")
+		declineBtn := tgbotapi.NewInlineKeyboardButtonData("Отказ", "quest_decline_7")
+		keyboard := tgbotapi.NewInlineKeyboardMarkup(
+			tgbotapi.NewInlineKeyboardRow(acceptBtn, declineBtn),
+		)
+		msg.ReplyMarkup = keyboard
+		h.sendMessage(msg)
+		return
+	}
+	if quest7.Status == "active" {
+		activeText := fmt.Sprintf(`Активный квест: 🍔 Квест 7: Перекус
+Задание: Съешь 3 ягоды (%d/3)
+Для выполнения квеста необходимо в инвентаре напротив предмета "Лесная ягода" выполнить команду eat.
+Награда: 🎖 10 опыта + 📖 Страница 7 «Шёпот ветра»`, quest7.Progress)
+		msg := tgbotapi.NewMessage(message.Chat.ID, activeText)
+		h.sendMessage(msg)
+		return
+	}
+	if quest7.Status == "completed" {
+		msg := tgbotapi.NewMessage(message.Chat.ID, "🎉 Ты завершил всю цепочку ЛОР-квестов! Продолжение следует...")
+		h.sendMessage(msg)
+		return
+	}
 }
 
 func (h *BotHandlers) handleDailyQuests(message *tgbotapi.Message) {
@@ -3376,12 +3534,14 @@ func (h *BotHandlers) handleLookPages(message *tgbotapi.Message) {
 			pageMap[5] = fmt.Sprintf("%s - %d шт. /read5", item.ItemName, item.Quantity)
 		} else if strings.Contains(item.ItemName, "📖 Страница 6") {
 			pageMap[6] = fmt.Sprintf("%s - %d шт. /read6", item.ItemName, item.Quantity)
+		} else if strings.Contains(item.ItemName, "📖 Страница 7") {
+			pageMap[7] = fmt.Sprintf("%s - %d шт. /read7", item.ItemName, item.Quantity)
 		}
 	}
 
 	// Создаем отсортированный список страниц
 	var pages []string
-	for i := 1; i <= 6; i++ {
+	for i := 1; i <= 7; i++ {
 		if page, exists := pageMap[i]; exists {
 			pages = append(pages, page)
 		}
@@ -3468,11 +3628,19 @@ func (h *BotHandlers) handleReadPage(message *tgbotapi.Message) {
 "Поначалу земля молчала. Ты копал, строил, охотился — и всё было, как будто в пустоте.
 Но с каждым ударом по камню, с каждым дымком над костром ты чувствовал, что что-то наблюдает. Не враждебное. Но древнее."`
 		}
+		if strings.Contains(item.ItemName, "📖 Страница 7") && item.Quantity > 0 {
+			pageMap[7] = "📖 Страница 7 «Шёпот ветра»"
+			pageTexts["📖 Страница 7 «Шёпот ветра»"] = `📖 Страница 7 «Шёпот ветра»
+
+"Иногда по ночам ты слышал, как шелестят листья без ветра.
+Как в костре трескается не дрова, а слова. Неслышные, шепчущие.
+Земля словно пыталась заговорить с тобой, но ещё не решалась."`
+		}
 	}
 
 	// Создаем отсортированный список страниц
 	var availablePages []string
-	for i := 1; i <= 6; i++ {
+	for i := 1; i <= 7; i++ {
 		if page, exists := pageMap[i]; exists {
 			availablePages = append(availablePages, page)
 		}
@@ -3740,6 +3908,47 @@ func (h *BotHandlers) handleReadPage6(message *tgbotapi.Message) {
 
 "Поначалу земля молчала. Ты копал, строил, охотился — и всё было, как будто в пустоте.
 Но с каждым ударом по камню, с каждым дымком над костром ты чувствовал, что что-то наблюдает. Не враждебное. Но древнее."`
+
+	msg := tgbotapi.NewMessage(message.Chat.ID, pageText)
+	h.sendMessage(msg)
+
+	// Проверяем прогресс квеста 6 после успешного чтения страницы
+	h.checkLorePagesQuestProgressSequential(message.From.ID, message.Chat.ID, player.ID, 6)
+}
+
+func (h *BotHandlers) handleReadPage7(message *tgbotapi.Message) {
+	userID := message.From.ID
+
+	// Получаем игрока
+	player, err := h.db.GetPlayer(userID)
+	if err != nil {
+		log.Printf("Error getting player: %v", err)
+		msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка. Попробуйте позже.")
+		h.sendMessage(msg)
+		return
+	}
+
+	// Проверяем наличие страницы 7 в инвентаре
+	pageQuantity, err := h.db.GetItemQuantityInInventory(player.ID, "📖 Страница 7 «Шёпот ветра»")
+	if err != nil {
+		log.Printf("Error checking page in inventory: %v", err)
+		msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка. Попробуйте позже.")
+		h.sendMessage(msg)
+		return
+	}
+
+	if pageQuantity == 0 {
+		msg := tgbotapi.NewMessage(message.Chat.ID, "У вас нет седьмой страницы.")
+		h.sendMessage(msg)
+		return
+	}
+
+	// Показываем текст седьмой страницы
+	pageText := `📖 Страница 7 «Шёпот ветра»
+
+"Иногда по ночам ты слышал, как шелестят листья без ветра.
+Как в костре трескается не дрова, а слова. Неслышные, шепчущие.
+Земля словно пыталась заговорить с тобой, но ещё не решалась."`
 
 	msg := tgbotapi.NewMessage(message.Chat.ID, pageText)
 	h.sendMessage(msg)
