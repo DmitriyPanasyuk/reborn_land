@@ -143,6 +143,14 @@ func (h *BotHandlers) handleMessage(message *tgbotapi.Message) {
 		h.handleDailyQuests(message)
 	case "📆 Еженедельные":
 		h.handleWeeklyQuests(message)
+	case "/look":
+		h.handleLookPages(message)
+	case "/read":
+		h.handleReadPage(message)
+	case "/read1":
+		h.handleReadPage1(message)
+	case "/read2":
+		h.handleReadPage2(message)
 	default:
 		// Неизвестная команда
 		msg := tgbotapi.NewMessage(message.Chat.ID, "Неизвестная команда. Используйте /start для начала игры.")
@@ -365,7 +373,20 @@ func (h *BotHandlers) handleInventory(message *tgbotapi.Message) {
 		return
 	}
 
-	if len(inventory) == 0 {
+	// Разделяем предметы на категории
+	var regularItems []models.InventoryItem
+	var pages []models.InventoryItem
+
+	for _, item := range inventory {
+		if strings.Contains(item.ItemName, "📖 Страница") {
+			pages = append(pages, item)
+		} else {
+			regularItems = append(regularItems, item)
+		}
+	}
+
+	// Проверяем, есть ли обычные предметы
+	if len(regularItems) == 0 && len(pages) == 0 {
 		msg := tgbotapi.NewMessage(message.Chat.ID, "🎒 Ваш инвентарь пуст.")
 		h.sendMessage(msg)
 		return
@@ -373,7 +394,9 @@ func (h *BotHandlers) handleInventory(message *tgbotapi.Message) {
 
 	// Формируем текст инвентаря
 	inventoryText := "🎒 Ваш инвентарь:\n\n"
-	for _, item := range inventory {
+
+	// Добавляем обычные предметы
+	for _, item := range regularItems {
 		if item.Type == "tool" && item.Durability > 0 {
 			inventoryText += fmt.Sprintf("%s - %d шт. (Прочность: %d/100)\n", item.ItemName, item.Quantity, item.Durability)
 		} else if item.ItemName == "Лесная ягода" {
@@ -381,6 +404,11 @@ func (h *BotHandlers) handleInventory(message *tgbotapi.Message) {
 		} else {
 			inventoryText += fmt.Sprintf("%s - %d шт.\n", item.ItemName, item.Quantity)
 		}
+	}
+
+	// Добавляем раздел страниц, если они есть
+	if len(pages) > 0 {
+		inventoryText += "\n📖 Страницы: /look\n"
 	}
 
 	msg := tgbotapi.NewMessage(message.Chat.ID, inventoryText)
@@ -2414,6 +2442,195 @@ func (h *BotHandlers) handleDailyQuests(message *tgbotapi.Message) {
 
 func (h *BotHandlers) handleWeeklyQuests(message *tgbotapi.Message) {
 	msg := tgbotapi.NewMessage(message.Chat.ID, "📆 Функция еженедельных квестов пока в разработке...")
+	h.sendMessage(msg)
+}
+
+func (h *BotHandlers) handleLookPages(message *tgbotapi.Message) {
+	userID := message.From.ID
+
+	// Получаем игрока
+	player, err := h.db.GetPlayer(userID)
+	if err != nil {
+		log.Printf("Error getting player: %v", err)
+		msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка. Попробуйте позже.")
+		h.sendMessage(msg)
+		return
+	}
+
+	// Получаем инвентарь игрока
+	inventory, err := h.db.GetPlayerInventory(player.ID)
+	if err != nil {
+		log.Printf("Error getting inventory: %v", err)
+		msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка. Попробуйте позже.")
+		h.sendMessage(msg)
+		return
+	}
+
+	// Фильтруем только страницы
+	var pages []string
+	for _, item := range inventory {
+		if strings.Contains(item.ItemName, "📖 Страница 1") {
+			pages = append(pages, fmt.Sprintf("%s - %d шт. /read1",
+				item.ItemName,
+				item.Quantity))
+		} else if strings.Contains(item.ItemName, "📖 Страница 2") {
+			pages = append(pages, fmt.Sprintf("%s - %d шт. /read2",
+				item.ItemName,
+				item.Quantity))
+		}
+	}
+
+	if len(pages) == 0 {
+		msg := tgbotapi.NewMessage(message.Chat.ID, "📖 У вас пока нет страниц.")
+		h.sendMessage(msg)
+		return
+	}
+
+	// Формируем сообщение со страницами
+	text := "📖 Ваши страницы:\n\n" + strings.Join(pages, "\n")
+	msg := tgbotapi.NewMessage(message.Chat.ID, text)
+	h.sendMessage(msg)
+}
+
+func (h *BotHandlers) handleReadPage(message *tgbotapi.Message) {
+	userID := message.From.ID
+
+	// Получаем игрока
+	player, err := h.db.GetPlayer(userID)
+	if err != nil {
+		log.Printf("Error getting player: %v", err)
+		msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка. Попробуйте позже.")
+		h.sendMessage(msg)
+		return
+	}
+
+	// Получаем инвентарь игрока
+	inventory, err := h.db.GetPlayerInventory(player.ID)
+	if err != nil {
+		log.Printf("Error getting inventory: %v", err)
+		msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка. Попробуйте позже.")
+		h.sendMessage(msg)
+		return
+	}
+
+	// Находим все страницы в инвентаре
+	var availablePages []string
+	pageTexts := make(map[string]string)
+
+	// Определяем доступные страницы и их тексты
+	for _, item := range inventory {
+		if strings.Contains(item.ItemName, "📖 Страница 1") && item.Quantity > 0 {
+			availablePages = append(availablePages, "📖 Страница 1 «Забытая тишина»")
+			pageTexts["📖 Страница 1 «Забытая тишина»"] = `📖 Страница 1 «Забытая тишина»
+
+"Мир не был уничтожен в битве. Он просто... забыл сам себя.
+Годы прошли — может, столетия, может, тысячелетия. Никто не знает точно. От былых королевств остались лишь заросшие руины, поросшие мхом камни и полустёртые знаки, выгравированные на обломках."`
+		}
+		if strings.Contains(item.ItemName, "📖 Страница 2") && item.Quantity > 0 {
+			availablePages = append(availablePages, "📖 Страница 2 «Пыль веков»")
+			pageTexts["📖 Страница 2 «Пыль веков»"] = `📖 Страница 2 «Пыль веков»
+
+"Люди исчезли. Не все, возможно, но память о них — точно.
+Земля забыла их шаги. Знания рассыпались, будто песок в ветре. Остались лишь сны, смутные образы, и тихий зов из глубин мира."`
+		}
+	}
+
+	if len(availablePages) == 0 {
+		msg := tgbotapi.NewMessage(message.Chat.ID, "У вас нет страниц для чтения.")
+		h.sendMessage(msg)
+		return
+	}
+
+	// Если есть только одна страница, читаем её
+	if len(availablePages) == 1 {
+		pageText := pageTexts[availablePages[0]]
+		msg := tgbotapi.NewMessage(message.Chat.ID, pageText)
+		h.sendMessage(msg)
+		return
+	}
+
+	// Если страниц несколько, показываем все
+	var allTexts []string
+	for _, pageName := range availablePages {
+		allTexts = append(allTexts, pageTexts[pageName])
+	}
+
+	fullText := strings.Join(allTexts, "\n\n---\n\n")
+	msg := tgbotapi.NewMessage(message.Chat.ID, fullText)
+	h.sendMessage(msg)
+}
+
+func (h *BotHandlers) handleReadPage1(message *tgbotapi.Message) {
+	userID := message.From.ID
+
+	// Получаем игрока
+	player, err := h.db.GetPlayer(userID)
+	if err != nil {
+		log.Printf("Error getting player: %v", err)
+		msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка. Попробуйте позже.")
+		h.sendMessage(msg)
+		return
+	}
+
+	// Проверяем наличие страницы 1 в инвентаре
+	pageQuantity, err := h.db.GetItemQuantityInInventory(player.ID, "📖 Страница 1 «Забытая тишина»")
+	if err != nil {
+		log.Printf("Error checking page in inventory: %v", err)
+		msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка. Попробуйте позже.")
+		h.sendMessage(msg)
+		return
+	}
+
+	if pageQuantity == 0 {
+		msg := tgbotapi.NewMessage(message.Chat.ID, "У вас нет первой страницы.")
+		h.sendMessage(msg)
+		return
+	}
+
+	// Показываем текст первой страницы
+	pageText := `📖 Страница 1 «Забытая тишина»
+
+"Мир не был уничтожен в битве. Он просто... забыл сам себя.
+Годы прошли — может, столетия, может, тысячелетия. Никто не знает точно. От былых королевств остались лишь заросшие руины, поросшие мхом камни и полустёртые знаки, выгравированные на обломках."`
+
+	msg := tgbotapi.NewMessage(message.Chat.ID, pageText)
+	h.sendMessage(msg)
+}
+
+func (h *BotHandlers) handleReadPage2(message *tgbotapi.Message) {
+	userID := message.From.ID
+
+	// Получаем игрока
+	player, err := h.db.GetPlayer(userID)
+	if err != nil {
+		log.Printf("Error getting player: %v", err)
+		msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка. Попробуйте позже.")
+		h.sendMessage(msg)
+		return
+	}
+
+	// Проверяем наличие страницы 2 в инвентаре
+	pageQuantity, err := h.db.GetItemQuantityInInventory(player.ID, "📖 Страница 2 «Пыль веков»")
+	if err != nil {
+		log.Printf("Error checking page in inventory: %v", err)
+		msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка. Попробуйте позже.")
+		h.sendMessage(msg)
+		return
+	}
+
+	if pageQuantity == 0 {
+		msg := tgbotapi.NewMessage(message.Chat.ID, "У вас нет второй страницы.")
+		h.sendMessage(msg)
+		return
+	}
+
+	// Показываем текст второй страницы
+	pageText := `📖 Страница 2 «Пыль веков»
+
+"Люди исчезли. Не все, возможно, но память о них — точно.
+Земля забыла их шаги. Знания рассыпались, будто песок в ветре. Остались лишь сны, смутные образы, и тихий зов из глубин мира."`
+
+	msg := tgbotapi.NewMessage(message.Chat.ID, pageText)
 	h.sendMessage(msg)
 }
 
