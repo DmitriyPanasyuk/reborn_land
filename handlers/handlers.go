@@ -734,7 +734,7 @@ func (h *BotHandlers) showMineField(chatID int64, mine *models.Mine, field [][]s
 
 	// Затем отправляем информационное сообщение с клавиатурой
 	// Вычисляем опыт до следующего уровня
-	expToNext := ((mine.Level + 1) * 100) - mine.Experience
+	expToNext := (mine.Level * 100) - mine.Experience
 
 	infoText := fmt.Sprintf(`⛏ Шахта (Уровень %d)
 До следующего уровня: %d опыта
@@ -1030,7 +1030,7 @@ func (h *BotHandlers) showForestField(chatID int64, forest *models.Forest, field
 
 	// Затем отправляем информационное сообщение с клавиатурой
 	// Вычисляем опыт до следующего уровня
-	expToNext := ((forest.Level + 1) * 100) - forest.Experience
+	expToNext := (forest.Level * 100) - forest.Experience
 
 	infoText := fmt.Sprintf(`🪓 Рубка (Уровень %d)
 До следующего уровня: %d опыта
@@ -1746,7 +1746,7 @@ func (h *BotHandlers) updateMineField(chatID int64, field [][]string, messageID 
 
 func (h *BotHandlers) updateMineInfoMessage(userID int64, chatID int64, mine *models.Mine, messageID int) {
 	// Вычисляем опыт до следующего уровня
-	expToNext := ((mine.Level + 1) * 100) - mine.Experience
+	expToNext := (mine.Level * 100) - mine.Experience
 
 	infoText := fmt.Sprintf(`⛏ Шахта (Уровень %d)
 До следующего уровня: %d опыта
@@ -2164,7 +2164,7 @@ func (h *BotHandlers) updateForestField(chatID int64, field [][]string, messageI
 
 func (h *BotHandlers) updateForestInfoMessage(userID int64, chatID int64, forest *models.Forest, messageID int) {
 	// Вычисляем опыт до следующего уровня
-	expToNext := ((forest.Level + 1) * 100) - forest.Experience
+	expToNext := (forest.Level * 100) - forest.Experience
 
 	infoText := fmt.Sprintf(`🪓 Рубка (Уровень %d)
 До следующего уровня: %d опыта
@@ -2629,13 +2629,27 @@ func (h *BotHandlers) completeCrafting(userID int64, chatID int64, itemName stri
 		log.Printf("Error adding crafted items to inventory: %v", err)
 	}
 
+	// Отнимаем сытость (1 единица за каждый созданный предмет)
+	if err := h.db.UpdatePlayerSatiety(player.ID, -quantity); err != nil {
+		log.Printf("Error updating player satiety: %v", err)
+	}
+
+	// Получаем обновленные данные игрока для отображения сытости
+	updatedPlayer, err := h.db.GetPlayer(userID)
+	if err != nil {
+		log.Printf("Error getting updated player: %v", err)
+		// Если не удалось получить обновленные данные, используем старые
+		updatedPlayer = player
+	}
+
 	// Удаляем сообщение о крафте
 	deleteMsg := tgbotapi.NewDeleteMessage(chatID, messageID)
 	h.requestAPI(deleteMsg)
 
-	// Показываем результат
+	// Показываем результат с сытостью
 	resultText := fmt.Sprintf(`✅ Создание завершено!
-Получено: "%s" x%d`, itemName, quantity)
+Получено: "%s" x%d
+Сытость: %d/100`, itemName, quantity, updatedPlayer.Satiety)
 
 	msg := tgbotapi.NewMessage(chatID, resultText)
 	h.sendMessage(msg)
