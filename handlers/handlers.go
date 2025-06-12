@@ -151,6 +151,8 @@ func (h *BotHandlers) handleMessage(message *tgbotapi.Message) {
 		h.handleReadPage1(message)
 	case "/read2":
 		h.handleReadPage2(message)
+	case "/read3":
+		h.handleReadPage3(message)
 	default:
 		// Неизвестная команда
 		msg := tgbotapi.NewMessage(message.Chat.ID, "Неизвестная команда. Используйте /start для начала игры.")
@@ -2427,10 +2429,63 @@ func (h *BotHandlers) handleLore(message *tgbotapi.Message) {
 		}
 
 		if quest2.Status == "completed" {
-			// Квест 2 тоже выполнен, показываем заглушку
-			msg := tgbotapi.NewMessage(message.Chat.ID, "Цепочка квестов в разработке.")
-			h.sendMessage(msg)
-			return
+			// Квест 2 выполнен, проверяем квест 3
+			quest3, err := h.db.GetPlayerQuest(player.ID, 3)
+			if err != nil {
+				log.Printf("Error getting quest 3: %v", err)
+				msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка при получении квеста.")
+				h.sendMessage(msg)
+				return
+			}
+
+			if quest3 == nil || quest3.Status == "available" {
+				// Квест 3 еще не создан или доступен для принятия
+				if quest3 == nil {
+					// Создаем квест 3, если его нет
+					err := h.db.CreateQuest(player.ID, 3, 3) // Квест 3: создать 3 березовых бруса
+					if err != nil {
+						log.Printf("Error creating quest 3: %v", err)
+						msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка при создании квеста.")
+						h.sendMessage(msg)
+						return
+					}
+				}
+
+				// Показываем предложение квеста 3
+				questText := `🪚 Квест 3: Руки мастера
+Задание: Создай 3 берёзовых бруса
+Награда: 🎖 10 опыта + 📖 Страница 3 «Первый шаг»`
+
+				msg := tgbotapi.NewMessage(message.Chat.ID, questText)
+
+				// Создаем инлайн кнопки
+				acceptBtn := tgbotapi.NewInlineKeyboardButtonData("Принять", "quest_accept_3")
+				declineBtn := tgbotapi.NewInlineKeyboardButtonData("Отказ", "quest_decline_3")
+				keyboard := tgbotapi.NewInlineKeyboardMarkup(
+					tgbotapi.NewInlineKeyboardRow(acceptBtn, declineBtn),
+				)
+				msg.ReplyMarkup = keyboard
+				h.sendMessage(msg)
+				return
+			}
+
+			if quest3.Status == "active" {
+				// Квест 3 активен, показываем прогресс
+				activeText := fmt.Sprintf(`Активный квест: 🪚 Квест 3: Руки мастера
+Задание: Создай 3 берёзовых бруса (%d/3)
+Награда: 🎖 10 опыта + 📖 Страница 3 «Первый шаг»`, quest3.Progress)
+
+				msg := tgbotapi.NewMessage(message.Chat.ID, activeText)
+				h.sendMessage(msg)
+				return
+			}
+
+			if quest3.Status == "completed" {
+				// Все квесты выполнены, показываем заглушку
+				msg := tgbotapi.NewMessage(message.Chat.ID, "Цепочка квестов в разработке.")
+				h.sendMessage(msg)
+				return
+			}
 		}
 	}
 }
@@ -2475,6 +2530,10 @@ func (h *BotHandlers) handleLookPages(message *tgbotapi.Message) {
 				item.Quantity))
 		} else if strings.Contains(item.ItemName, "📖 Страница 2") {
 			pages = append(pages, fmt.Sprintf("%s - %d шт. /read2",
+				item.ItemName,
+				item.Quantity))
+		} else if strings.Contains(item.ItemName, "📖 Страница 3") {
+			pages = append(pages, fmt.Sprintf("%s - %d шт. /read3",
 				item.ItemName,
 				item.Quantity))
 		}
@@ -2532,6 +2591,13 @@ func (h *BotHandlers) handleReadPage(message *tgbotapi.Message) {
 
 "Люди исчезли. Не все, возможно, но память о них — точно.
 Земля забыла их шаги. Знания рассыпались, будто песок в ветре. Остались лишь сны, смутные образы, и тихий зов из глубин мира."`
+		}
+		if strings.Contains(item.ItemName, "📖 Страница 3") && item.Quantity > 0 {
+			availablePages = append(availablePages, "📖 Страница 3 «Первый шаг»")
+			pageTexts["📖 Страница 3 «Первый шаг»"] = `📖 Страница 3 «Первый шаг»
+
+"Ты — один из тех, кто откликнулся.
+Никто не сказал тебе, зачем ты проснулся. В этом нет наставников, богов или проводников. Только ты, дикая земля — и чувство, что всё это уже было. Что ты здесь не впервые."`
 		}
 	}
 
@@ -2629,6 +2695,43 @@ func (h *BotHandlers) handleReadPage2(message *tgbotapi.Message) {
 
 "Люди исчезли. Не все, возможно, но память о них — точно.
 Земля забыла их шаги. Знания рассыпались, будто песок в ветре. Остались лишь сны, смутные образы, и тихий зов из глубин мира."`
+
+	msg := tgbotapi.NewMessage(message.Chat.ID, pageText)
+	h.sendMessage(msg)
+}
+
+func (h *BotHandlers) handleReadPage3(message *tgbotapi.Message) {
+	userID := message.From.ID
+
+	// Получаем игрока
+	player, err := h.db.GetPlayer(userID)
+	if err != nil {
+		log.Printf("Error getting player: %v", err)
+		msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка. Попробуйте позже.")
+		h.sendMessage(msg)
+		return
+	}
+
+	// Проверяем наличие страницы 3 в инвентаре
+	pageQuantity, err := h.db.GetItemQuantityInInventory(player.ID, "📖 Страница 3 «Первый шаг»")
+	if err != nil {
+		log.Printf("Error checking page in inventory: %v", err)
+		msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка. Попробуйте позже.")
+		h.sendMessage(msg)
+		return
+	}
+
+	if pageQuantity == 0 {
+		msg := tgbotapi.NewMessage(message.Chat.ID, "У вас нет третьей страницы.")
+		h.sendMessage(msg)
+		return
+	}
+
+	// Показываем текст третьей страницы
+	pageText := `📖 Страница 3 «Первый шаг»
+
+"Ты — один из тех, кто откликнулся.
+Никто не сказал тебе, зачем ты проснулся. В этом нет наставников, богов или проводников. Только ты, дикая земля — и чувство, что всё это уже было. Что ты здесь не впервые."`
 
 	msg := tgbotapi.NewMessage(message.Chat.ID, pageText)
 	h.sendMessage(msg)
@@ -3046,6 +3149,11 @@ func (h *BotHandlers) completeCrafting(userID int64, chatID int64, itemName stri
 	msg := tgbotapi.NewMessage(chatID, resultText)
 	h.sendMessage(msg)
 
+	// Проверяем прогресс квеста 3 (создание березовых брусов)
+	if itemName == "Березовый брус" {
+		h.checkBirchPlankQuestProgress(userID, chatID, player.ID, quantity)
+	}
+
 	// Убираем таймер
 	delete(h.craftingTimers, userID)
 }
@@ -3098,6 +3206,60 @@ func (h *BotHandlers) checkBirchQuestProgress(userID int64, chatID int64, player
 Получена награда:
 🎖 10 опыта
 📖 Страница 1 «Забытая тишина»`
+
+		msg := tgbotapi.NewMessage(chatID, questCompleteText)
+		h.sendMessage(msg)
+	}
+}
+
+func (h *BotHandlers) checkBirchPlankQuestProgress(userID int64, chatID int64, playerID int, quantity int) {
+	// Проверяем активный квест 3 (создание березовых брусов)
+	quest, err := h.db.GetPlayerQuest(playerID, 3)
+	if err != nil {
+		log.Printf("Error getting quest 3: %v", err)
+		return
+	}
+
+	// Если квест не активен, ничего не делаем
+	if quest == nil || quest.Status != "active" {
+		return
+	}
+
+	// Увеличиваем прогресс квеста на количество созданных брусов
+	newProgress := quest.Progress + quantity
+	err = h.db.UpdateQuestProgress(playerID, 3, newProgress)
+	if err != nil {
+		log.Printf("Error updating quest 3 progress: %v", err)
+		return
+	}
+
+	// Проверяем, выполнен ли квест
+	if newProgress >= quest.Target {
+		// Квест выполнен!
+		err = h.db.UpdateQuestStatus(playerID, 3, "completed")
+		if err != nil {
+			log.Printf("Error completing quest 3: %v", err)
+			return
+		}
+
+		// Добавляем награды
+		// 10 опыта игроку
+		err = h.db.UpdatePlayerExperience(playerID, 10)
+		if err != nil {
+			log.Printf("Error updating player experience: %v", err)
+		}
+
+		// Добавляем страницу в инвентарь
+		err = h.db.AddItemToInventory(playerID, "📖 Страница 3 «Первый шаг»", 1)
+		if err != nil {
+			log.Printf("Error adding quest item to inventory: %v", err)
+		}
+
+		// Отправляем сообщение о выполнении квеста
+		questCompleteText := `🪚 Квест 3: Руки мастера ВЫПОЛНЕН!
+Получена награда:
+🎖 10 опыта
+📖 Страница 3 «Первый шаг»`
 
 		msg := tgbotapi.NewMessage(chatID, questCompleteText)
 		h.sendMessage(msg)
