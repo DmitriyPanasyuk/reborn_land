@@ -101,8 +101,6 @@ func (h *BotHandlers) handleMessage(message *tgbotapi.Message) {
 		h.handleFurnace(message)
 	case "🔥 Костер":
 		h.handleCampfire(message)
-	case "🏗️ Строительство":
-		h.handleConstruction(message)
 	case "◀️ Назад":
 		h.handleBack(message)
 	case "⛏ Шахта":
@@ -143,6 +141,8 @@ func (h *BotHandlers) handleMessage(message *tgbotapi.Message) {
 		h.handleDailyQuests(message)
 	case "📆 Еженедельные":
 		h.handleWeeklyQuests(message)
+	case "🏘️ Постройки":
+		h.handleBuildings(message)
 	case "/look":
 		h.handleLookPages(message)
 	case "/read":
@@ -537,14 +537,6 @@ func (h *BotHandlers) handleFurnace(message *tgbotapi.Message) {
 
 func (h *BotHandlers) handleCampfire(message *tgbotapi.Message) {
 	msg := tgbotapi.NewMessage(message.Chat.ID, "🔥 Функция костра пока в разработке...")
-	h.sendMessage(msg)
-}
-
-func (h *BotHandlers) handleConstruction(message *tgbotapi.Message) {
-	constructionText := `🏠 Доступные постройки:
-Простая хижина /create_simple_hut`
-
-	msg := tgbotapi.NewMessage(message.Chat.ID, constructionText)
 	h.sendMessage(msg)
 }
 
@@ -1869,6 +1861,9 @@ func (h *BotHandlers) sendWithKeyboard(msg tgbotapi.MessageConfig) {
 			tgbotapi.NewKeyboardButton("🔨 Рабочее место"),
 			tgbotapi.NewKeyboardButton("📜 Квесты"),
 		),
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton("🏘️ Постройки"),
+		),
 	)
 	keyboard.ResizeKeyboard = true
 	msg.ReplyMarkup = keyboard
@@ -1884,7 +1879,6 @@ func (h *BotHandlers) sendWorkplaceKeyboard(msg tgbotapi.MessageConfig) {
 		),
 		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton("🔥 Костер"),
-			tgbotapi.NewKeyboardButton("🏗️ Строительство"),
 		),
 		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton("◀️ Назад"),
@@ -2497,6 +2491,14 @@ func (h *BotHandlers) handleDailyQuests(message *tgbotapi.Message) {
 
 func (h *BotHandlers) handleWeeklyQuests(message *tgbotapi.Message) {
 	msg := tgbotapi.NewMessage(message.Chat.ID, "📆 Функция еженедельных квестов пока в разработке...")
+	h.sendMessage(msg)
+}
+
+func (h *BotHandlers) handleBuildings(message *tgbotapi.Message) {
+	buildingsText := `🏘️ Доступные постройки:
+Простая хижина /create_simple_hut`
+
+	msg := tgbotapi.NewMessage(message.Chat.ID, buildingsText)
 	h.sendMessage(msg)
 }
 
