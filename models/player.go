@@ -112,3 +112,23 @@ type Quest struct {
 	CreatedAt   time.Time  `json:"created_at"`
 	CompletedAt *time.Time `json:"completed_at"`
 }
+
+type Hunting struct {
+	ID          int       `json:"id"`
+	PlayerID    int       `json:"player_id"`
+	Level       int       `json:"level"`
+	Experience  int       `json:"experience"`
+	LastUsed    time.Time `json:"last_used"`
+	IsExhausted bool      `json:"is_exhausted"`
+}
+
+type HuntingSession struct {
+	PlayerID        int64      `json:"player_id"`
+	Resources       [][]string `json:"resources"` // 3x3 массив ресурсов
+	IsActive        bool       `json:"is_active"`
+	IsHunting       bool       `json:"is_hunting"`
+	StartedAt       time.Time  `json:"started_at"`
+	FieldMessageID  int        `json:"field_message_id"`  // ID сообщения с полем охоты
+	InfoMessageID   int        `json:"info_message_id"`   // ID сообщения с информацией об охоте
+	ResultMessageID int        `json:"result_message_id"` // ID сообщения с результатом охоты
+}

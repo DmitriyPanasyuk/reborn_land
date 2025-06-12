@@ -795,6 +795,127 @@ func (db *DB) UpdatePlayerExperience(playerID int, expGained int) error {
 	return err
 }
 
+func (db *DB) GetOrCreateHunting(playerID int) (*models.Hunting, error) {
+	var hunting models.Hunting
+
+	// Пытаемся найти существующую охоту
+	err := db.conn.QueryRow(`
+		SELECT id, player_id, level, experience, last_used, is_exhausted 
+		FROM hunting WHERE player_id = $1`, playerID,
+	).Scan(&hunting.ID, &hunting.PlayerID, &hunting.Level, &hunting.Experience, &hunting.LastUsed, &hunting.IsExhausted)
+
+	if err == sql.ErrNoRows {
+		// Создаем новую охоту
+		err = db.conn.QueryRow(`
+			INSERT INTO hunting (player_id, level, experience, is_exhausted) 
+			VALUES ($1, 1, 0, false) 
+			RETURNING id, player_id, level, experience, last_used, is_exhausted`,
+			playerID,
+		).Scan(&hunting.ID, &hunting.PlayerID, &hunting.Level, &hunting.Experience, &hunting.LastUsed, &hunting.IsExhausted)
+	}
+
+	return &hunting, err
+}
+
+func (db *DB) UpdateHuntingExperience(playerID int, expGained int) (bool, int, error) {
+	// Получаем текущий уровень и опыт
+	var currentLevel, currentExp int
+	err := db.conn.QueryRow(`
+		SELECT level, experience 
+		FROM hunting WHERE player_id = $1`,
+		playerID,
+	).Scan(&currentLevel, &currentExp)
+	if err != nil {
+		return false, 0, err
+	}
+
+	// Вычисляем новый опыт
+	newExp := currentExp + expGained
+
+	// Вычисляем новый уровень
+	newLevel := currentLevel
+	for newExp >= newLevel*100 {
+		newLevel++
+	}
+
+	// Обновляем данные в базе
+	_, err = db.conn.Exec(`
+		UPDATE hunting 
+		SET experience = $1, level = $2
+		WHERE player_id = $3`,
+		newExp, newLevel, playerID,
+	)
+	if err != nil {
+		return false, 0, err
+	}
+
+	// Возвращаем информацию о повышении уровня
+	levelUp := newLevel > currentLevel
+	return levelUp, newLevel, nil
+}
+
+func (db *DB) SetHuntingExhausted(playerID int, exhausted bool) error {
+	_, err := db.conn.Exec(`
+		UPDATE hunting 
+		SET is_exhausted = $1, last_used = CURRENT_TIMESTAMP
+		WHERE player_id = $2`,
+		exhausted, playerID,
+	)
+	return err
+}
+
+func (db *DB) ExhaustHunting(playerID int64) error {
+	_, err := db.conn.Exec(`
+		UPDATE hunting 
+		SET is_exhausted = true, last_used = CURRENT_TIMESTAMP
+		WHERE player_id = $1`,
+		playerID,
+	)
+	return err
+}
+
+func (db *DB) RemoveItemFromInventory(playerID int, itemName string, quantity int) error {
+	// Обновляем количество через JOIN с таблицей items
+	_, err := db.conn.Exec(`
+		UPDATE inventory 
+		SET quantity = quantity - $3
+		FROM items 
+		WHERE inventory.item_id = items.id 
+		AND inventory.player_id = $1 
+		AND items.name = $2 
+		AND inventory.quantity >= $3`,
+		playerID, itemName, quantity,
+	)
+	if err != nil {
+		return err
+	}
+
+	// Удаляем записи с нулевым количеством
+	_, err = db.conn.Exec(`
+		DELETE FROM inventory 
+		USING items 
+		WHERE inventory.item_id = items.id 
+		AND inventory.player_id = $1 
+		AND items.name = $2 
+		AND inventory.quantity <= 0`,
+		playerID, itemName,
+	)
+	return err
+}
+
+func (db *DB) UpdateToolDurability(playerID int, toolName string, newDurability int) error {
+	_, err := db.conn.Exec(`
+		UPDATE inventory 
+		SET durability = $3
+		FROM items 
+		WHERE inventory.item_id = items.id 
+		AND inventory.player_id = $1 
+		AND items.name = $2`,
+		playerID, toolName, newDurability,
+	)
+	return err
+}
+
 func (db *DB) Close() error {
 	return db.conn.Close()
 }
