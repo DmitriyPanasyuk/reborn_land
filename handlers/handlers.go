@@ -163,6 +163,8 @@ func (h *BotHandlers) handleMessage(message *tgbotapi.Message) {
 		h.handleReadPage4(message)
 	case "/read5":
 		h.handleReadPage5(message)
+	case "/read6":
+		h.handleReadPage6(message)
 	default:
 		// Неизвестная команда
 		msg := tgbotapi.NewMessage(message.Chat.ID, "Неизвестная команда. Используйте /start для начала игры.")
@@ -3170,9 +3172,55 @@ func (h *BotHandlers) handleLore(message *tgbotapi.Message) {
 						return
 					}
 					if quest5.Status == "completed" {
-						msg := tgbotapi.NewMessage(message.Chat.ID, "🎉 Ты завершил всю цепочку ЛОР-квестов! Продолжение следует...")
-						h.sendMessage(msg)
-						return
+						// Квест 5 выполнен, проверяем квест 6
+						quest6, err := h.db.GetPlayerQuest(player.ID, 6)
+						if err != nil {
+							log.Printf("Error getting quest 6: %v", err)
+							msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка при получении квеста.")
+							h.sendMessage(msg)
+							return
+						}
+						if quest6 == nil || quest6.Status == "available" {
+							// Квест 6 еще не создан или доступен для принятия
+							if quest6 == nil {
+								// Создаем квест 6, если его нет
+								err := h.db.CreateQuest(player.ID, 6, 5) // Квест 6: прочитать 5 страниц
+								if err != nil {
+									log.Printf("Error creating quest 6: %v", err)
+									msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка при создании квеста.")
+									h.sendMessage(msg)
+									return
+								}
+							}
+							// Показываем предложение квеста 6
+							questText := `📘 Квест 6: Живое Хранилище
+Задание: Открой 5 страниц лора
+Для выполнения задания необходимо в инвентаре в разделе "Страницы"
+вызвать команду look и затем прочитать 5 страниц ЛОРа от 1-й до 5-й.
+Награда: 🎖 10 опыта + 📖 Страница 6 «Сон о башне»`
+							msg := tgbotapi.NewMessage(message.Chat.ID, questText)
+							acceptBtn := tgbotapi.NewInlineKeyboardButtonData("Принять", "quest_accept_6")
+							declineBtn := tgbotapi.NewInlineKeyboardButtonData("Отказ", "quest_decline_6")
+							keyboard := tgbotapi.NewInlineKeyboardMarkup(
+								tgbotapi.NewInlineKeyboardRow(acceptBtn, declineBtn),
+							)
+							msg.ReplyMarkup = keyboard
+							h.sendMessage(msg)
+							return
+						}
+						if quest6.Status == "active" {
+							activeText := fmt.Sprintf(`Активный квест: 📘 Квест 6: Живое Хранилище
+Задание: Открой 5 страниц лора (%d/5)
+Награда: 🎖 10 опыта + 📖 Страница 6 «Сон о башне»`, quest6.Progress)
+							msg := tgbotapi.NewMessage(message.Chat.ID, activeText)
+							h.sendMessage(msg)
+							return
+						}
+						if quest6.Status == "completed" {
+							msg := tgbotapi.NewMessage(message.Chat.ID, "🎉 Ты завершил всю цепочку ЛОР-квестов! Продолжение следует...")
+							h.sendMessage(msg)
+							return
+						}
 					}
 				}
 			}
@@ -3222,9 +3270,55 @@ func (h *BotHandlers) handleLore(message *tgbotapi.Message) {
 		return
 	}
 	if quest5.Status == "completed" {
-		msg := tgbotapi.NewMessage(message.Chat.ID, "🎉 Ты завершил всю цепочку ЛОР-квестов! Продолжение следует...")
-		h.sendMessage(msg)
-		return
+		// Квест 5 выполнен, проверяем квест 6
+		quest6, err := h.db.GetPlayerQuest(player.ID, 6)
+		if err != nil {
+			log.Printf("Error getting quest 6: %v", err)
+			msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка при получении квеста.")
+			h.sendMessage(msg)
+			return
+		}
+		if quest6 == nil || quest6.Status == "available" {
+			// Квест 6 еще не создан или доступен для принятия
+			if quest6 == nil {
+				// Создаем квест 6, если его нет
+				err := h.db.CreateQuest(player.ID, 6, 5) // Квест 6: прочитать 5 страниц
+				if err != nil {
+					log.Printf("Error creating quest 6: %v", err)
+					msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка при создании квеста.")
+					h.sendMessage(msg)
+					return
+				}
+			}
+			// Показываем предложение квеста 6
+			questText := `📘 Квест 6: Живое Хранилище
+Задание: Открой 5 страниц лора
+Для выполнения задания необходимо в инвентаре в разделе "Страницы"
+вызвать команду look и затем прочитать 5 страниц ЛОРа от 1-й до 5-й.
+Награда: 🎖 10 опыта + 📖 Страница 6 «Сон о башне»`
+			msg := tgbotapi.NewMessage(message.Chat.ID, questText)
+			acceptBtn := tgbotapi.NewInlineKeyboardButtonData("Принять", "quest_accept_6")
+			declineBtn := tgbotapi.NewInlineKeyboardButtonData("Отказ", "quest_decline_6")
+			keyboard := tgbotapi.NewInlineKeyboardMarkup(
+				tgbotapi.NewInlineKeyboardRow(acceptBtn, declineBtn),
+			)
+			msg.ReplyMarkup = keyboard
+			h.sendMessage(msg)
+			return
+		}
+		if quest6.Status == "active" {
+			activeText := fmt.Sprintf(`Активный квест: 📘 Квест 6: Живое Хранилище
+Задание: Открой 5 страниц лора (%d/5)
+Награда: 🎖 10 опыта + 📖 Страница 6 «Сон о башне»`, quest6.Progress)
+			msg := tgbotapi.NewMessage(message.Chat.ID, activeText)
+			h.sendMessage(msg)
+			return
+		}
+		if quest6.Status == "completed" {
+			msg := tgbotapi.NewMessage(message.Chat.ID, "🎉 Ты завершил всю цепочку ЛОР-квестов! Продолжение следует...")
+			h.sendMessage(msg)
+			return
+		}
 	}
 }
 
@@ -3280,12 +3374,14 @@ func (h *BotHandlers) handleLookPages(message *tgbotapi.Message) {
 			pageMap[4] = fmt.Sprintf("%s - %d шт. /read4", item.ItemName, item.Quantity)
 		} else if strings.Contains(item.ItemName, "📖 Страница 5") {
 			pageMap[5] = fmt.Sprintf("%s - %d шт. /read5", item.ItemName, item.Quantity)
+		} else if strings.Contains(item.ItemName, "📖 Страница 6") {
+			pageMap[6] = fmt.Sprintf("%s - %d шт. /read6", item.ItemName, item.Quantity)
 		}
 	}
 
 	// Создаем отсортированный список страниц
 	var pages []string
-	for i := 1; i <= 5; i++ {
+	for i := 1; i <= 6; i++ {
 		if page, exists := pageMap[i]; exists {
 			pages = append(pages, page)
 		}
@@ -3338,38 +3434,45 @@ func (h *BotHandlers) handleReadPage(message *tgbotapi.Message) {
 Годы прошли — может, столетия, может, тысячелетия. Никто не знает точно. От былых королевств остались лишь заросшие руины, поросшие мхом камни и полустёртые знаки, выгравированные на обломках."`
 		}
 		if strings.Contains(item.ItemName, "📖 Страница 2") && item.Quantity > 0 {
-			pageMap[2] = "📖 Страница 2 «Пыль веков»"
-			pageTexts["📖 Страница 2 «Пыль веков»"] = `📖 Страница 2 «Пыль веков»
+			pageMap[2] = "📖 Страница 2 «Пепел памяти»"
+			pageTexts["📖 Страница 2 «Пепел памяти»"] = `📖 Страница 2 «Пепел памяти»
 
 "Люди исчезли. Не все, возможно, но память о них — точно.
 Земля забыла их шаги. Знания рассыпались, будто песок в ветре. Остались лишь сны, смутные образы, и тихий зов из глубин мира."`
 		}
 		if strings.Contains(item.ItemName, "📖 Страница 3") && item.Quantity > 0 {
-			pageMap[3] = "📖 Страница 3 «Первый шаг»"
-			pageTexts["📖 Страница 3 «Первый шаг»"] = `📖 Страница 3 «Первый шаг»
+			pageMap[3] = "📖 Страница 3 «Пробуждение»"
+			pageTexts["📖 Страница 3 «Пробуждение»"] = `📖 Страница 3 «Пробуждение»
 
 "Ты — один из тех, кто откликнулся.
 Никто не сказал тебе, зачем ты проснулся. В этом нет наставников, богов или проводников. Только ты, дикая земля — и чувство, что всё это уже было. Что ты здесь не впервые."`
 		}
 		if strings.Contains(item.ItemName, "📖 Страница 4") && item.Quantity > 0 {
-			pageMap[4] = "📖 Страница 4 «Голос земли»"
-			pageTexts["📖 Страница 4 «Голос земли»"] = `📖 Страница 4 «Голос земли»
+			pageMap[4] = "📖 Страница 4 «Без имени»"
+			pageTexts["📖 Страница 4 «Без имени»"] = `📖 Страница 4 «Без имени»
 
 "У тебя ничего нет. Ни дома, ни имени, ни цели. Только старая кирка, тёплый свет солнца и бескрайняя, живая земля, что будто наблюдает за каждым твоим шагом."`
 		}
 		if strings.Contains(item.ItemName, "📖 Страница 5") && item.Quantity > 0 {
-			pageMap[5] = "📖 Страница 5 «След древних»"
-			pageTexts["📖 Страница 5 «След древних»"] = `📖 Страница 5 «След древних»
+			pageMap[5] = "📖 Страница 5 «Искра перемен»"
+			pageTexts["📖 Страница 5 «Искра перемен»"] = `📖 Страница 5 «Искра перемен»
 
 "Но ты чувствуешь — если построить хижину, зажечь огонь, добыть первый камень… что-то изменится.
 В тебе. В этом месте. В самой памяти мира.
 Возможно, ты не просто выживший. Возможно, ты — начало нового."`
 		}
+		if strings.Contains(item.ItemName, "📖 Страница 6") && item.Quantity > 0 {
+			pageMap[6] = "📖 Страница 6 «Наблюдающий лес»"
+			pageTexts["📖 Страница 6 «Наблюдающий лес»"] = `📖 Страница 6 «Наблюдающий лес»
+
+"Поначалу земля молчала. Ты копал, строил, охотился — и всё было, как будто в пустоте.
+Но с каждым ударом по камню, с каждым дымком над костром ты чувствовал, что что-то наблюдает. Не враждебное. Но древнее."`
+		}
 	}
 
 	// Создаем отсортированный список страниц
 	var availablePages []string
-	for i := 1; i <= 5; i++ {
+	for i := 1; i <= 6; i++ {
 		if page, exists := pageMap[i]; exists {
 			availablePages = append(availablePages, page)
 		}
@@ -3398,6 +3501,11 @@ func (h *BotHandlers) handleReadPage(message *tgbotapi.Message) {
 	fullText := strings.Join(allTexts, "\n\n---\n\n")
 	msg := tgbotapi.NewMessage(message.Chat.ID, fullText)
 	h.sendMessage(msg)
+
+	// Проверяем прогресс квеста 6 после успешного чтения страницы
+	h.checkLorePagesQuestProgressSequential(message.From.ID, message.Chat.ID, player.ID, 6)
+
+	return
 }
 
 func (h *BotHandlers) handleReadPage1(message *tgbotapi.Message) {
@@ -3435,6 +3543,9 @@ func (h *BotHandlers) handleReadPage1(message *tgbotapi.Message) {
 
 	msg := tgbotapi.NewMessage(message.Chat.ID, pageText)
 	h.sendMessage(msg)
+
+	// Проверяем прогресс квеста 6 после успешного чтения страницы
+	h.checkLorePagesQuestProgressSequential(message.From.ID, message.Chat.ID, player.ID, 1)
 }
 
 func (h *BotHandlers) handleReadPage2(message *tgbotapi.Message) {
@@ -3450,7 +3561,7 @@ func (h *BotHandlers) handleReadPage2(message *tgbotapi.Message) {
 	}
 
 	// Проверяем наличие страницы 2 в инвентаре
-	pageQuantity, err := h.db.GetItemQuantityInInventory(player.ID, "📖 Страница 2 «Пыль веков»")
+	pageQuantity, err := h.db.GetItemQuantityInInventory(player.ID, "📖 Страница 2 «Пепел памяти»")
 	if err != nil {
 		log.Printf("Error checking page in inventory: %v", err)
 		msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка. Попробуйте позже.")
@@ -3465,13 +3576,16 @@ func (h *BotHandlers) handleReadPage2(message *tgbotapi.Message) {
 	}
 
 	// Показываем текст второй страницы
-	pageText := `📖 Страница 2 «Пыль веков»
+	pageText := `📖 Страница 2 «Пепел памяти»
 
 "Люди исчезли. Не все, возможно, но память о них — точно.
 Земля забыла их шаги. Знания рассыпались, будто песок в ветре. Остались лишь сны, смутные образы, и тихий зов из глубин мира."`
 
 	msg := tgbotapi.NewMessage(message.Chat.ID, pageText)
 	h.sendMessage(msg)
+
+	// Проверяем прогресс квеста 6 после успешного чтения страницы
+	h.checkLorePagesQuestProgressSequential(message.From.ID, message.Chat.ID, player.ID, 2)
 }
 
 func (h *BotHandlers) handleReadPage3(message *tgbotapi.Message) {
@@ -3487,7 +3601,7 @@ func (h *BotHandlers) handleReadPage3(message *tgbotapi.Message) {
 	}
 
 	// Проверяем наличие страницы 3 в инвентаре
-	pageQuantity, err := h.db.GetItemQuantityInInventory(player.ID, "📖 Страница 3 «Первый шаг»")
+	pageQuantity, err := h.db.GetItemQuantityInInventory(player.ID, "📖 Страница 3 «Пробуждение»")
 	if err != nil {
 		log.Printf("Error checking page in inventory: %v", err)
 		msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка. Попробуйте позже.")
@@ -3502,13 +3616,16 @@ func (h *BotHandlers) handleReadPage3(message *tgbotapi.Message) {
 	}
 
 	// Показываем текст третьей страницы
-	pageText := `📖 Страница 3 «Первый шаг»
+	pageText := `📖 Страница 3 «Пробуждение»
 
 "Ты — один из тех, кто откликнулся.
 Никто не сказал тебе, зачем ты проснулся. В этом нет наставников, богов или проводников. Только ты, дикая земля — и чувство, что всё это уже было. Что ты здесь не впервые."`
 
 	msg := tgbotapi.NewMessage(message.Chat.ID, pageText)
 	h.sendMessage(msg)
+
+	// Проверяем прогресс квеста 6 после успешного чтения страницы
+	h.checkLorePagesQuestProgressSequential(message.From.ID, message.Chat.ID, player.ID, 3)
 }
 
 func (h *BotHandlers) handleReadPage4(message *tgbotapi.Message) {
@@ -3524,7 +3641,7 @@ func (h *BotHandlers) handleReadPage4(message *tgbotapi.Message) {
 	}
 
 	// Проверяем наличие страницы 4 в инвентаре
-	pageQuantity, err := h.db.GetItemQuantityInInventory(player.ID, "📖 Страница 4 «Голос земли»")
+	pageQuantity, err := h.db.GetItemQuantityInInventory(player.ID, "📖 Страница 4 «Без имени»")
 	if err != nil {
 		log.Printf("Error checking page in inventory: %v", err)
 		msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка. Попробуйте позже.")
@@ -3539,16 +3656,21 @@ func (h *BotHandlers) handleReadPage4(message *tgbotapi.Message) {
 	}
 
 	// Показываем текст четвертой страницы
-	pageText := `📖 Страница 4 «Голос земли»
+	pageText := `📖 Страница 4 «Без имени»
 
 "У тебя ничего нет. Ни дома, ни имени, ни цели. Только старая кирка, тёплый свет солнца и бескрайняя, живая земля, что будто наблюдает за каждым твоим шагом."`
 
 	msg := tgbotapi.NewMessage(message.Chat.ID, pageText)
 	h.sendMessage(msg)
+
+	// Проверяем прогресс квеста 6 после успешного чтения страницы
+	h.checkLorePagesQuestProgressSequential(message.From.ID, message.Chat.ID, player.ID, 4)
 }
 
 func (h *BotHandlers) handleReadPage5(message *tgbotapi.Message) {
 	userID := message.From.ID
+
+	// Получаем игрока
 	player, err := h.db.GetPlayer(userID)
 	if err != nil {
 		log.Printf("Error getting player: %v", err)
@@ -3556,30 +3678,69 @@ func (h *BotHandlers) handleReadPage5(message *tgbotapi.Message) {
 		h.sendMessage(msg)
 		return
 	}
-	inventory, err := h.db.GetPlayerInventory(player.ID)
+
+	// Проверяем наличие страницы 5 в инвентаре
+	pageQuantity, err := h.db.GetItemQuantityInInventory(player.ID, "📖 Страница 5 «Искра перемен»")
 	if err != nil {
-		log.Printf("Error getting inventory: %v", err)
+		log.Printf("Error checking page in inventory: %v", err)
 		msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка. Попробуйте позже.")
 		h.sendMessage(msg)
 		return
 	}
-	found := false
-	for _, item := range inventory {
-		if strings.Contains(item.ItemName, "📖 Страница 5") && item.Quantity > 0 {
-			found = true
-			break
-		}
-	}
-	if !found {
-		msg := tgbotapi.NewMessage(message.Chat.ID, "У вас нет этой страницы.")
+
+	if pageQuantity == 0 {
+		msg := tgbotapi.NewMessage(message.Chat.ID, "У вас нет пятой страницы.")
 		h.sendMessage(msg)
 		return
 	}
-	pageText := `📖 Страница 5 «След древних»
+
+	// Показываем текст пятой страницы
+	pageText := `📖 Страница 5 «Искра перемен»
 
 "Но ты чувствуешь — если построить хижину, зажечь огонь, добыть первый камень… что-то изменится.
 В тебе. В этом месте. В самой памяти мира.
 Возможно, ты не просто выживший. Возможно, ты — начало нового."`
+
+	msg := tgbotapi.NewMessage(message.Chat.ID, pageText)
+	h.sendMessage(msg)
+
+	// Проверяем прогресс квеста 6 после успешного чтения страницы
+	h.checkLorePagesQuestProgressSequential(message.From.ID, message.Chat.ID, player.ID, 5)
+}
+
+func (h *BotHandlers) handleReadPage6(message *tgbotapi.Message) {
+	userID := message.From.ID
+
+	// Получаем игрока
+	player, err := h.db.GetPlayer(userID)
+	if err != nil {
+		log.Printf("Error getting player: %v", err)
+		msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка. Попробуйте позже.")
+		h.sendMessage(msg)
+		return
+	}
+
+	// Проверяем наличие страницы 6 в инвентаре
+	pageQuantity, err := h.db.GetItemQuantityInInventory(player.ID, "📖 Страница 6 «Наблюдающий лес»")
+	if err != nil {
+		log.Printf("Error checking page in inventory: %v", err)
+		msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка. Попробуйте позже.")
+		h.sendMessage(msg)
+		return
+	}
+
+	if pageQuantity == 0 {
+		msg := tgbotapi.NewMessage(message.Chat.ID, "У вас нет шестой страницы.")
+		h.sendMessage(msg)
+		return
+	}
+
+	// Показываем текст шестой страницы
+	pageText := `📖 Страница 6 «Наблюдающий лес»
+
+"Поначалу земля молчала. Ты копал, строил, охотился — и всё было, как будто в пустоте.
+Но с каждым ударом по камню, с каждым дымком над костром ты чувствовал, что что-то наблюдает. Не враждебное. Но древнее."`
+
 	msg := tgbotapi.NewMessage(message.Chat.ID, pageText)
 	h.sendMessage(msg)
 }
@@ -4102,7 +4263,7 @@ func (h *BotHandlers) checkBirchPlankQuestProgress(userID int64, chatID int64, p
 		}
 
 		// Добавляем страницу в инвентарь
-		err = h.db.AddItemToInventory(playerID, "📖 Страница 3 «Первый шаг»", 1)
+		err = h.db.AddItemToInventory(playerID, "📖 Страница 3 «Пробуждение»", 1)
 		if err != nil {
 			log.Printf("Error adding quest item to inventory: %v", err)
 		}
@@ -4111,7 +4272,7 @@ func (h *BotHandlers) checkBirchPlankQuestProgress(userID int64, chatID int64, p
 		questCompleteText := `🪚 Квест 3: Руки мастера ВЫПОЛНЕН!
 Получена награда:
 🎖 10 опыта
-📖 Страница 3 «Первый шаг»`
+📖 Страница 3 «Пробуждение»`
 
 		msg := tgbotapi.NewMessage(chatID, questCompleteText)
 		h.sendMessage(msg)
@@ -4156,7 +4317,7 @@ func (h *BotHandlers) checkStoneQuestProgress(userID int64, chatID int64, player
 		}
 
 		// Добавляем страницу в инвентарь
-		err = h.db.AddItemToInventory(playerID, "📖 Страница 2 «Пыль веков»", 1)
+		err = h.db.AddItemToInventory(playerID, "📖 Страница 2 «Пепел памяти»", 1)
 		if err != nil {
 			log.Printf("Error adding quest item to inventory: %v", err)
 		}
@@ -4165,7 +4326,7 @@ func (h *BotHandlers) checkStoneQuestProgress(userID int64, chatID int64, player
 		questCompleteText := `⛏ Квест 2: Вглубь ВЫПОЛНЕН!
 Получена награда:
 🎖 10 опыта
-📖 Страница 2 «Пыль веков»`
+📖 Страница 2 «Пепел памяти»`
 
 		msg := tgbotapi.NewMessage(chatID, questCompleteText)
 		h.sendMessage(msg)
@@ -4210,7 +4371,7 @@ func (h *BotHandlers) checkBerryQuestProgress(userID int64, chatID int64, player
 		}
 
 		// Добавляем страницу в инвентарь
-		err = h.db.AddItemToInventory(playerID, "📖 Страница 4 «Голос земли»", 1)
+		err = h.db.AddItemToInventory(playerID, "📖 Страница 4 «Без имени»", 1)
 		if err != nil {
 			log.Printf("Error adding quest item to inventory: %v", err)
 		}
@@ -4219,7 +4380,7 @@ func (h *BotHandlers) checkBerryQuestProgress(userID int64, chatID int64, player
 		questCompleteText := `🍇 Квест 4: Дар леса ВЫПОЛНЕН!
 Получена награда:
 🎖 10 опыта
-📖 Страница 4 «Голос земли»`
+📖 Страница 4 «Без имени»`
 
 		msg := tgbotapi.NewMessage(chatID, questCompleteText)
 		h.sendMessage(msg)
@@ -4264,7 +4425,7 @@ func (h *BotHandlers) checkHuntingQuestProgress(userID int64, chatID int64, play
 		}
 
 		// Добавляем страницу 5 в инвентарь
-		err = h.db.AddItemToInventory(playerID, "📖 Страница 5 «След древних»", 1)
+		err = h.db.AddItemToInventory(playerID, "📖 Страница 5 «Искра перемен»", 1)
 		if err != nil {
 			log.Printf("Error adding quest item to inventory: %v", err)
 		}
@@ -4273,8 +4434,61 @@ func (h *BotHandlers) checkHuntingQuestProgress(userID int64, chatID int64, play
 		questCompleteText := `🎯 Квест 5: Звериный взгляд ВЫПОЛНЕН!
 Получена награда:
 🎖 10 опыта
-📖 Страница 5 «След древних»`
+📖 Страница 5 «Искра перемен»`
 		msg := tgbotapi.NewMessage(chatID, questCompleteText)
 		h.sendMessage(msg)
+	}
+}
+
+func (h *BotHandlers) checkLorePagesQuestProgressSequential(userID int64, chatID int64, playerID int, pageNumber int) {
+	// Проверяем активный квест 6 (чтение страниц)
+	quest, err := h.db.GetPlayerQuest(playerID, 6)
+	if err != nil {
+		log.Printf("Error getting quest 6: %v", err)
+		return
+	}
+
+	if quest == nil || quest.Status != "active" {
+		return
+	}
+
+	// Прогресс квеста — номер последней прочитанной страницы (0..5)
+	if quest.Progress+1 == pageNumber {
+		newProgress := quest.Progress + 1
+		err = h.db.UpdateQuestProgress(playerID, 6, newProgress)
+		if err != nil {
+			log.Printf("Error updating quest 6 progress: %v", err)
+			return
+		}
+
+		if newProgress == 5 {
+			// Квест выполнен!
+			err = h.db.UpdateQuestStatus(playerID, 6, "completed")
+			if err != nil {
+				log.Printf("Error completing quest 6: %v", err)
+				return
+			}
+
+			// Выдаем награду
+			err = h.db.AddItemToInventory(playerID, "📖 Страница 6 «Наблюдающий лес»", 1)
+			if err != nil {
+				log.Printf("Error adding quest 6 reward: %v", err)
+				return
+			}
+
+			// Добавляем опыт
+			err = h.db.UpdatePlayerExperience(playerID, 10)
+			if err != nil {
+				log.Printf("Error adding quest 6 experience: %v", err)
+				return
+			}
+
+			// Отправляем сообщение о выполнении
+			msg := tgbotapi.NewMessage(chatID, `🎉 Поздравляем! Ты выполнил квест "Живое Хранилище"!
+Награда:
+🎖 +10 опыта
+📖 Страница 6 «Наблюдающий лес»`)
+			h.sendMessage(msg)
+		}
 	}
 }

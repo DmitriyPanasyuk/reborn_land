@@ -13,6 +13,13 @@ type DB struct {
 	conn *sql.DB
 }
 
+// Item представляет предмет в инвентаре игрока
+type Item struct {
+	ItemName string
+	ItemType string
+	Quantity int
+}
+
 func New(databaseURL string) (*DB, error) {
 	conn, err := sql.Open("postgres", databaseURL)
 	if err != nil {
@@ -131,10 +138,11 @@ func (db *DB) seedItems() error {
 		{"Крючок", "material", 0},
 		{"Береза", "material", 0},
 		{"📖 Страница 1 «Забытая тишина»", "quest_item", 0},
-		{"📖 Страница 2 «Пыль веков»", "quest_item", 0},
-		{"📖 Страница 3 «Первый шаг»", "quest_item", 0},
-		{"📖 Страница 4 «Голос земли»", "quest_item", 0},
-		{"📖 Страница 5 «След древних»", "quest_item", 0},
+		{"📖 Страница 2 «Пепел памяти»", "quest_item", 0},
+		{"📖 Страница 3 «Пробуждение»", "quest_item", 0},
+		{"📖 Страница 4 «Без имени»", "quest_item", 0},
+		{"📖 Страница 5 «Искра перемен»", "quest_item", 0},
+		{"📖 Страница 6 «Наблюдающий лес»", "quest_item", 0},
 	}
 
 	// Добавляем каждый предмет, если его нет
@@ -920,4 +928,42 @@ func (db *DB) UpdateToolDurability(playerID int, toolName string, newDurability 
 
 func (db *DB) Close() error {
 	return db.conn.Close()
+}
+
+// GetPlayerItems возвращает все предметы игрока
+func (db *DB) GetPlayerItems(playerID int) ([]Item, error) {
+	var items []Item
+	query := `SELECT item_name, item_type, quantity FROM player_items WHERE player_id = $1`
+	rows, err := db.conn.Query(query, playerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var item Item
+		err := rows.Scan(&item.ItemName, &item.ItemType, &item.Quantity)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, nil
+}
+
+// AddPlayerItem добавляет предмет игроку
+func (db *DB) AddPlayerItem(playerID int, itemName string, quantity int) error {
+	query := `INSERT INTO player_items (player_id, item_name, item_type, quantity)
+			  VALUES ($1, $2, (SELECT item_type FROM seed_items WHERE item_name = $2), $3)
+			  ON CONFLICT (player_id, item_name) 
+			  DO UPDATE SET quantity = player_items.quantity + $3`
+	_, err := db.conn.Exec(query, playerID, itemName, quantity)
+	return err
+}
+
+// AddPlayerExperience добавляет опыт игроку
+func (db *DB) AddPlayerExperience(playerID int, amount int) error {
+	query := `UPDATE players SET experience = experience + $1 WHERE id = $2`
+	_, err := db.conn.Exec(query, amount, playerID)
+	return err
 }
