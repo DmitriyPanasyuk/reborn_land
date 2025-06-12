@@ -271,6 +271,17 @@ func (h *BotHandlers) handleNameInput(message *tgbotapi.Message) {
 		return
 	}
 
+	// Добавляем стартовые предметы новому игроку
+	err = h.db.AddItemToInventoryWithDurability(player.ID, "Простой лук", 1, 100)
+	if err != nil {
+		log.Printf("Error adding bow to new player: %v", err)
+	}
+
+	err = h.db.AddItemToInventory(player.ID, "Стрелы", 100)
+	if err != nil {
+		log.Printf("Error adding arrows to new player: %v", err)
+	}
+
 	// Убираем флаг ожидания имени
 	delete(h.waitingForName, userID)
 
@@ -281,7 +292,11 @@ func (h *BotHandlers) handleNameInput(message *tgbotapi.Message) {
 
 Твой уровень: %d
 Опыт: %d/100
-Сытость: %d/100`, player.Name, player.Level, player.Experience, player.Satiety)
+Сытость: %d/100
+
+🎁 Стартовые предметы добавлены в инвентарь:
+• Простой лук - 1 шт. (Прочность: 100/100)
+• Стрелы - 100 шт.`, player.Name, player.Level, player.Experience, player.Satiety)
 
 	msg := tgbotapi.NewMessage(message.Chat.ID, successText)
 	h.sendWithKeyboard(msg)

@@ -454,6 +454,42 @@ func (db *DB) AddItemToInventory(playerID int, itemName string, quantity int) er
 	return err
 }
 
+func (db *DB) AddItemToInventoryWithDurability(playerID int, itemName string, quantity int, durability int) error {
+	// Сначала получаем ID предмета
+	var itemID int
+	err := db.conn.QueryRow("SELECT id FROM items WHERE name = $1", itemName).Scan(&itemID)
+	if err != nil {
+		return err
+	}
+
+	// Проверяем, есть ли уже этот предмет в инвентаре
+	var existingQuantity int
+	err = db.conn.QueryRow(`
+		SELECT quantity FROM inventory 
+		WHERE player_id = $1 AND item_id = $2`,
+		playerID, itemID,
+	).Scan(&existingQuantity)
+
+	if err == sql.ErrNoRows {
+		// Добавляем новый предмет с указанной прочностью
+		_, err = db.conn.Exec(`
+			INSERT INTO inventory (player_id, item_id, quantity, durability) 
+			VALUES ($1, $2, $3, $4)`,
+			playerID, itemID, quantity, durability,
+		)
+	} else if err == nil {
+		// Увеличиваем количество существующего предмета
+		_, err = db.conn.Exec(`
+			UPDATE inventory 
+			SET quantity = quantity + $1
+			WHERE player_id = $2 AND item_id = $3`,
+			quantity, playerID, itemID,
+		)
+	}
+
+	return err
+}
+
 func (db *DB) UpdatePlayerSatiety(playerID int, satietyChange int) error {
 	_, err := db.conn.Exec(`
 		UPDATE players 
