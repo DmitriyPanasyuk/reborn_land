@@ -86,6 +86,16 @@ func (db *DB) createTables() error {
 			last_used TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			is_exhausted BOOLEAN DEFAULT false
 		)`,
+		`CREATE TABLE IF NOT EXISTS quests (
+			id SERIAL PRIMARY KEY,
+			player_id INTEGER REFERENCES players(id),
+			quest_id INTEGER NOT NULL,
+			status VARCHAR(20) DEFAULT 'available',
+			progress INTEGER DEFAULT 0,
+			target INTEGER NOT NULL,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			completed_at TIMESTAMP NULL
+		)`,
 	}
 
 	for _, query := range queries {
@@ -120,6 +130,7 @@ func (db *DB) seedItems() error {
 		{"Веревка", "material", 0},
 		{"Крючок", "material", 0},
 		{"Береза", "material", 0},
+		{"📖 Страница 1 «Забытая тишина»", "quest_item", 0},
 	}
 
 	// Добавляем каждый предмет, если его нет
@@ -671,6 +682,77 @@ func (db *DB) ExhaustGathering(playerID int64) error {
 		SET is_exhausted = true, last_used = CURRENT_TIMESTAMP
 		WHERE player_id = $1`,
 		playerID,
+	)
+	return err
+}
+
+// Функции для работы с квестами
+func (db *DB) GetPlayerQuest(playerID int, questID int) (*models.Quest, error) {
+	var quest models.Quest
+	err := db.conn.QueryRow(`
+		SELECT id, player_id, quest_id, status, progress, target, created_at, completed_at
+		FROM quests 
+		WHERE player_id = $1 AND quest_id = $2`,
+		playerID, questID,
+	).Scan(&quest.ID, &quest.PlayerID, &quest.QuestID, &quest.Status, &quest.Progress, &quest.Target, &quest.CreatedAt, &quest.CompletedAt)
+
+	if err == sql.ErrNoRows {
+		return nil, nil // Квест не найден
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	return &quest, nil
+}
+
+func (db *DB) CreateQuest(playerID int, questID int, target int) error {
+	_, err := db.conn.Exec(`
+		INSERT INTO quests (player_id, quest_id, status, progress, target)
+		VALUES ($1, $2, 'available', 0, $3)`,
+		playerID, questID, target,
+	)
+	return err
+}
+
+func (db *DB) UpdateQuestStatus(playerID int, questID int, status string) error {
+	if status == "completed" {
+		// Если квест завершается, обновляем статус и время завершения
+		_, err := db.conn.Exec(`
+			UPDATE quests 
+			SET status = $3, completed_at = CURRENT_TIMESTAMP
+			WHERE player_id = $1 AND quest_id = $2`,
+			playerID, questID, status,
+		)
+		return err
+	} else {
+		// Если квест не завершается, обновляем только статус
+		_, err := db.conn.Exec(`
+			UPDATE quests 
+			SET status = $3
+			WHERE player_id = $1 AND quest_id = $2`,
+			playerID, questID, status,
+		)
+		return err
+	}
+}
+
+func (db *DB) UpdateQuestProgress(playerID int, questID int, progress int) error {
+	_, err := db.conn.Exec(`
+		UPDATE quests 
+		SET progress = $3
+		WHERE player_id = $1 AND quest_id = $2`,
+		playerID, questID, progress,
+	)
+	return err
+}
+
+func (db *DB) UpdatePlayerExperience(playerID int, expGained int) error {
+	_, err := db.conn.Exec(`
+		UPDATE players 
+		SET experience = experience + $2
+		WHERE id = $1`,
+		playerID, expGained,
 	)
 	return err
 }

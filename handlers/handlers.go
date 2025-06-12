@@ -1468,6 +1468,14 @@ func (h *BotHandlers) handleCallbackQuery(callback *tgbotapi.CallbackQuery) {
 		// Обрабатываем крафт
 		itemName := strings.TrimPrefix(data, "craft_")
 		h.handleCraftCallback(userID, callback.Message.Chat.ID, itemName, callback.ID)
+	} else if strings.HasPrefix(data, "quest_accept_") {
+		// Принятие квеста
+		questIDStr := strings.TrimPrefix(data, "quest_accept_")
+		questID, _ := strconv.Atoi(questIDStr)
+		h.handleQuestAccept(userID, callback.Message.Chat.ID, questID, callback.ID, callback.Message.MessageID)
+	} else if strings.HasPrefix(data, "quest_decline_") {
+		// Отказ от квеста
+		h.handleQuestDecline(callback.Message.Chat.ID, callback.ID, callback.Message.MessageID)
 	} else {
 		// Остальные callback
 		msg := tgbotapi.NewMessage(callback.Message.Chat.ID, "🔨 Функция пока в разработке...")
@@ -1475,6 +1483,44 @@ func (h *BotHandlers) handleCallbackQuery(callback *tgbotapi.CallbackQuery) {
 		callbackConfig := tgbotapi.NewCallback(callback.ID, "")
 		h.requestAPI(callbackConfig)
 	}
+}
+
+func (h *BotHandlers) handleQuestAccept(userID int64, chatID int64, questID int, callbackID string, messageID int) {
+	// Получаем игрока
+	player, err := h.db.GetPlayer(userID)
+	if err != nil {
+		log.Printf("Error getting player: %v", err)
+		callbackConfig := tgbotapi.NewCallback(callbackID, "Ошибка получения данных игрока")
+		h.requestAPI(callbackConfig)
+		return
+	}
+
+	// Активируем квест
+	err = h.db.UpdateQuestStatus(player.ID, questID, "active")
+	if err != nil {
+		log.Printf("Error updating quest status: %v", err)
+		callbackConfig := tgbotapi.NewCallback(callbackID, "Ошибка активации квеста")
+		h.requestAPI(callbackConfig)
+		return
+	}
+
+	// Отвечаем на callback
+	callbackConfig := tgbotapi.NewCallback(callbackID, "Квест принят!")
+	h.requestAPI(callbackConfig)
+
+	// Удаляем сообщение с предложением квеста
+	deleteMsg := tgbotapi.NewDeleteMessage(chatID, messageID)
+	h.requestAPI(deleteMsg)
+}
+
+func (h *BotHandlers) handleQuestDecline(chatID int64, callbackID string, messageID int) {
+	// Отвечаем на callback
+	callbackConfig := tgbotapi.NewCallback(callbackID, "Квест отклонен")
+	h.requestAPI(callbackConfig)
+
+	// Удаляем сообщение с предложением квеста
+	deleteMsg := tgbotapi.NewDeleteMessage(chatID, messageID)
+	h.requestAPI(deleteMsg)
 }
 
 func (h *BotHandlers) handleCraftCallback(userID int64, chatID int64, itemName string, callbackID string) {
@@ -1644,7 +1690,7 @@ func (h *BotHandlers) completeMining(userID int64, chatID int64, resourceName st
 		resourceName,
 		updatedPlayer.Satiety,
 		oldDurability-1,
-		((mine.Level+1)*100)-mine.Experience)
+		(mine.Level*100)-mine.Experience)
 
 	msg := tgbotapi.NewMessage(chatID, resultText)
 	resultResponse, _ := h.sendMessageWithResponse(msg)
@@ -2034,6 +2080,11 @@ func (h *BotHandlers) completeChopping(userID int64, chatID int64, resourceName 
 		log.Printf("Error adding item to inventory: %v", err)
 	}
 
+	// Проверяем квест на рубку березы
+	if resourceName == "Береза" {
+		h.checkBirchQuestProgress(userID, chatID, player.ID)
+	}
+
 	// Обновляем прочность топора и сытость
 	if err := h.db.UpdateItemDurability(player.ID, "Простой топор", 1); err != nil {
 		log.Printf("Error updating item durability: %v", err)
@@ -2066,7 +2117,7 @@ func (h *BotHandlers) completeChopping(userID int64, chatID int64, resourceName 
 		resourceName,
 		updatedPlayer.Satiety,
 		oldDurability-1,
-		((forest.Level+1)*100)-forest.Experience)
+		(forest.Level*100)-forest.Experience)
 
 	msg := tgbotapi.NewMessage(chatID, resultText)
 	resultResponse, _ := h.sendMessageWithResponse(msg)
@@ -2228,8 +2279,74 @@ func (h *BotHandlers) sendQuestKeyboard(msg tgbotapi.MessageConfig) {
 }
 
 func (h *BotHandlers) handleLore(message *tgbotapi.Message) {
-	msg := tgbotapi.NewMessage(message.Chat.ID, "📖 Функция лор-квестов пока в разработке...")
-	h.sendMessage(msg)
+	userID := message.From.ID
+
+	// Получаем игрока
+	player, err := h.db.GetPlayer(userID)
+	if err != nil {
+		log.Printf("Error getting player: %v", err)
+		msg := tgbotapi.NewMessage(message.Chat.ID, "Сначала зарегистрируйтесь с помощью команды /start")
+		h.sendMessage(msg)
+		return
+	}
+
+	// Проверяем квест 1
+	quest, err := h.db.GetPlayerQuest(player.ID, 1)
+	if err != nil {
+		log.Printf("Error getting quest: %v", err)
+		msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка при получении квеста.")
+		h.sendMessage(msg)
+		return
+	}
+
+	if quest == nil || quest.Status == "available" {
+		// Квест еще не создан или доступен для принятия
+		if quest == nil {
+			// Создаем квест, если его нет
+			err := h.db.CreateQuest(player.ID, 1, 5) // Квест 1: нарубить 5 березы
+			if err != nil {
+				log.Printf("Error creating quest: %v", err)
+				msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка при создании квеста.")
+				h.sendMessage(msg)
+				return
+			}
+		}
+
+		// Показываем предложение квеста
+		questText := `🪓 Квест 1: Дерево под топор
+Задание: Наруби 5 берёзы
+Награда: 🎖 10 опыта + 📖 Страница 1 «Забытая тишина»`
+
+		msg := tgbotapi.NewMessage(message.Chat.ID, questText)
+
+		// Создаем инлайн кнопки
+		acceptBtn := tgbotapi.NewInlineKeyboardButtonData("Принять", "quest_accept_1")
+		declineBtn := tgbotapi.NewInlineKeyboardButtonData("Отказ", "quest_decline_1")
+		keyboard := tgbotapi.NewInlineKeyboardMarkup(
+			tgbotapi.NewInlineKeyboardRow(acceptBtn, declineBtn),
+		)
+		msg.ReplyMarkup = keyboard
+		h.sendMessage(msg)
+		return
+	}
+
+	if quest.Status == "active" {
+		// Квест активен, показываем прогресс
+		activeText := fmt.Sprintf(`Активный квест: 🪓 Квест 1: Дерево под топор
+Задание: Наруби 5 берёзы (%d/5)
+Награда: 🎖 10 опыта + 📖 Страница 1 «Забытая тишина»`, quest.Progress)
+
+		msg := tgbotapi.NewMessage(message.Chat.ID, activeText)
+		h.sendMessage(msg)
+		return
+	}
+
+	if quest.Status == "completed" {
+		// Квест выполнен, показываем заглушку
+		msg := tgbotapi.NewMessage(message.Chat.ID, "Цепочка квестов в разработке.")
+		h.sendMessage(msg)
+		return
+	}
 }
 
 func (h *BotHandlers) handleDailyQuests(message *tgbotapi.Message) {
@@ -2656,4 +2773,58 @@ func (h *BotHandlers) completeCrafting(userID int64, chatID int64, itemName stri
 
 	// Убираем таймер
 	delete(h.craftingTimers, userID)
+}
+
+func (h *BotHandlers) checkBirchQuestProgress(userID int64, chatID int64, playerID int) {
+	// Проверяем активный квест 1 (рубка березы)
+	quest, err := h.db.GetPlayerQuest(playerID, 1)
+	if err != nil {
+		log.Printf("Error getting quest: %v", err)
+		return
+	}
+
+	// Если квест не активен, ничего не делаем
+	if quest == nil || quest.Status != "active" {
+		return
+	}
+
+	// Увеличиваем прогресс квеста
+	newProgress := quest.Progress + 1
+	err = h.db.UpdateQuestProgress(playerID, 1, newProgress)
+	if err != nil {
+		log.Printf("Error updating quest progress: %v", err)
+		return
+	}
+
+	// Проверяем, выполнен ли квест
+	if newProgress >= quest.Target {
+		// Квест выполнен!
+		err = h.db.UpdateQuestStatus(playerID, 1, "completed")
+		if err != nil {
+			log.Printf("Error completing quest: %v", err)
+			return
+		}
+
+		// Добавляем награды
+		// 10 опыта игроку
+		err = h.db.UpdatePlayerExperience(playerID, 10)
+		if err != nil {
+			log.Printf("Error updating player experience: %v", err)
+		}
+
+		// Добавляем страницу в инвентарь
+		err = h.db.AddItemToInventory(playerID, "📖 Страница 1 «Забытая тишина»", 1)
+		if err != nil {
+			log.Printf("Error adding quest item to inventory: %v", err)
+		}
+
+		// Отправляем сообщение о выполнении квеста
+		questCompleteText := `🪓 Квест 1: Дерево под топор ВЫПОЛНЕН!
+Получена награда:
+🎖 10 опыта
+📖 Страница 1 «Забытая тишина»`
+
+		msg := tgbotapi.NewMessage(chatID, questCompleteText)
+		h.sendMessage(msg)
+	}
 }

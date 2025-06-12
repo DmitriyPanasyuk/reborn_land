@@ -101,3 +101,14 @@ type GatheringSession struct {
 	InfoMessageID   int        `json:"info_message_id"`   // ID сообщения с информацией о сборе
 	ResultMessageID int        `json:"result_message_id"` // ID сообщения с результатом сбора
 }
+
+type Quest struct {
+	ID          int        `json:"id"`
+	PlayerID    int        `json:"player_id"`
+	QuestID     int        `json:"quest_id"` // ID квеста (1, 2, 3...)
+	Status      string     `json:"status"`   // "available", "active", "completed"
+	Progress    int        `json:"progress"` // текущий прогресс
+	Target      int        `json:"target"`   // цель квеста
+	CreatedAt   time.Time  `json:"created_at"`
+	CompletedAt *time.Time `json:"completed_at"`
+}
