@@ -54,7 +54,8 @@ func (db *DB) createTables() error {
 			level INTEGER DEFAULT 1,
 			experience INTEGER DEFAULT 0,
 			satiety INTEGER DEFAULT 100,
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			simple_hut_built BOOLEAN DEFAULT false
 		)`,
 		`CREATE TABLE IF NOT EXISTS items (
 			id SERIAL PRIMARY KEY,
@@ -178,83 +179,13 @@ func (db *DB) PlayerExists(telegramID int64) (bool, error) {
 	return exists, err
 }
 
-func (db *DB) CreatePlayer(telegramID int64, name string) (*models.Player, error) {
-	var player models.Player
-	err := db.conn.QueryRow(`
-		INSERT INTO players (telegram_id, name, level, experience, satiety) 
-		VALUES ($1, $2, 1, 0, 100) 
-		RETURNING id, telegram_id, name, level, experience, satiety, created_at`,
-		telegramID, name,
-	).Scan(&player.ID, &player.TelegramID, &player.Name, &player.Level, &player.Experience, &player.Satiety, &player.CreatedAt)
-
-	if err != nil {
-		return nil, err
-	}
-
-	// Создаем начальный инвентарь
-	if err := db.createStarterInventory(player.ID); err != nil {
-		return nil, err
-	}
-
-	return &player, nil
-}
-
-func (db *DB) createStarterInventory(playerID int) error {
-	// Получаем ID предметов
-	var axeID, knifeID, berryID, pickaxeID int
-
-	err := db.conn.QueryRow("SELECT id FROM items WHERE name = 'Простой топор'").Scan(&axeID)
-	if err != nil {
-		return err
-	}
-
-	err = db.conn.QueryRow("SELECT id FROM items WHERE name = 'Простой нож'").Scan(&knifeID)
-	if err != nil {
-		return err
-	}
-
-	err = db.conn.QueryRow("SELECT id FROM items WHERE name = 'Лесная ягода'").Scan(&berryID)
-	if err != nil {
-		return err
-	}
-
-	err = db.conn.QueryRow("SELECT id FROM items WHERE name = 'Простая кирка'").Scan(&pickaxeID)
-	if err != nil {
-		return err
-	}
-
-	// Добавляем в инвентарь
-	items := []struct {
-		itemID     int
-		quantity   int
-		durability int
-	}{
-		{axeID, 1, 100},
-		{knifeID, 1, 100},
-		{pickaxeID, 1, 100},
-		{berryID, 10, 0},
-	}
-
-	for _, item := range items {
-		_, err := db.conn.Exec(
-			"INSERT INTO inventory (player_id, item_id, quantity, durability) VALUES ($1, $2, $3, $4)",
-			playerID, item.itemID, item.quantity, item.durability,
-		)
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
 func (db *DB) GetPlayer(telegramID int64) (*models.Player, error) {
 	var player models.Player
 	err := db.conn.QueryRow(`
-		SELECT id, telegram_id, name, level, experience, satiety, created_at 
+		SELECT id, telegram_id, name, level, experience, satiety, created_at, simple_hut_built
 		FROM players WHERE telegram_id = $1`,
 		telegramID,
-	).Scan(&player.ID, &player.TelegramID, &player.Name, &player.Level, &player.Experience, &player.Satiety, &player.CreatedAt)
+	).Scan(&player.ID, &player.TelegramID, &player.Name, &player.Level, &player.Experience, &player.Satiety, &player.CreatedAt, &player.SimpleHutBuilt)
 
 	if err != nil {
 		return nil, err
@@ -966,4 +897,55 @@ func (db *DB) AddPlayerExperience(playerID int, amount int) error {
 	query := `UPDATE players SET experience = experience + $1 WHERE id = $2`
 	_, err := db.conn.Exec(query, amount, playerID)
 	return err
+}
+
+// Устанавливает simple_hut_built = true для игрока
+func (db *DB) UpdateSimpleHutBuilt(playerID int, built bool) error {
+	_, err := db.conn.Exec(`UPDATE players SET simple_hut_built = $1 WHERE id = $2`, built, playerID)
+	return err
+}
+
+func (db *DB) CreatePlayer(telegramID int64, name string) (*models.Player, error) {
+	var player models.Player
+	err := db.conn.QueryRow(`
+		INSERT INTO players (telegram_id, name, level, experience, satiety, simple_hut_built)
+		VALUES ($1, $2, 1, 0, 100, false)
+		RETURNING id, telegram_id, name, level, experience, satiety, created_at, simple_hut_built`,
+		telegramID, name,
+	).Scan(&player.ID, &player.TelegramID, &player.Name, &player.Level, &player.Experience, &player.Satiety, &player.CreatedAt, &player.SimpleHutBuilt)
+
+	if err != nil {
+		return nil, err
+	}
+
+	// Создаем начальный инвентарь
+	if err := db.createStarterInventory(player.ID); err != nil {
+		return nil, err
+	}
+
+	return &player, nil
+}
+
+// createStarterInventory выдает стартовые предметы новому игроку
+func (db *DB) createStarterInventory(playerID int) error {
+	// Добавляем стартовые инструменты и ресурсы
+	if err := db.AddItemToInventoryWithDurability(playerID, "Простой лук", 1, 100); err != nil {
+		return err
+	}
+	if err := db.AddItemToInventoryWithDurability(playerID, "Простой нож", 1, 100); err != nil {
+		return err
+	}
+	if err := db.AddItemToInventoryWithDurability(playerID, "Простая кирка", 1, 100); err != nil {
+		return err
+	}
+	if err := db.AddItemToInventoryWithDurability(playerID, "Простой топор", 1, 100); err != nil {
+		return err
+	}
+	if err := db.AddItemToInventory(playerID, "Стрелы", 100); err != nil {
+		return err
+	}
+	if err := db.AddItemToInventory(playerID, "Лесная ягода", 10); err != nil {
+		return err
+	}
+	return nil
 }

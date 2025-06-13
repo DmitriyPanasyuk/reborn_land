@@ -3,13 +3,14 @@ package models
 import "time"
 
 type Player struct {
-	ID         int       `json:"id"`
-	TelegramID int64     `json:"telegram_id"`
-	Name       string    `json:"name"`
-	Level      int       `json:"level"`
-	Experience int       `json:"experience"`
-	Satiety    int       `json:"satiety"`
-	CreatedAt  time.Time `json:"created_at"`
+	ID             int       `json:"id"`
+	TelegramID     int64     `json:"telegram_id"`
+	Name           string    `json:"name"`
+	Level          int       `json:"level"`
+	Experience     int       `json:"experience"`
+	Satiety        int       `json:"satiety"`
+	CreatedAt      time.Time `json:"created_at"`
+	SimpleHutBuilt bool      `json:"simple_hut_built"`
 }
 
 type Item struct {

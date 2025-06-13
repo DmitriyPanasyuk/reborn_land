@@ -1990,11 +1990,13 @@ func (h *BotHandlers) handleCreateSimpleHut(message *tgbotapi.Message) {
 	}
 
 	// Добавляем кнопку "Создать"
-	var buttonText string
+	var buttonText, callbackData string
 	if canBuild {
 		buttonText = "Создать ✅"
+		callbackData = "craft_Простая хижина"
 	} else {
 		buttonText = "Создать ❌"
+		callbackData = "no_craft_Простая хижина"
 	}
 
 	msg := tgbotapi.NewMessage(message.Chat.ID, recipeText)
@@ -2002,7 +2004,7 @@ func (h *BotHandlers) handleCreateSimpleHut(message *tgbotapi.Message) {
 	// Создаем инлайн клавиатуру с кнопкой создать
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData(buttonText, "craft_Простая хижина"),
+			tgbotapi.NewInlineKeyboardButtonData(buttonText, callbackData),
 		),
 	)
 	msg.ReplyMarkup = keyboard
@@ -2071,6 +2073,64 @@ func (h *BotHandlers) showRecipe(message *tgbotapi.Message, itemName string) {
 func (h *BotHandlers) handleCallbackQuery(callback *tgbotapi.CallbackQuery) {
 	userID := callback.From.ID
 	data := callback.Data
+
+	log.Printf("[DEBUG] callback.Data: %s", data)
+
+	if strings.HasPrefix(data, "craft_Простая хижина") {
+		log.Printf("[DEBUG] Обработка строительства простой хижины")
+		player, err := h.db.GetPlayer(userID)
+		if err != nil {
+			log.Printf("[DEBUG] Ошибка получения игрока: %v", err)
+			callbackConfig := tgbotapi.NewCallback(callback.ID, "Ошибка получения данных игрока")
+			h.requestAPI(callbackConfig)
+			return
+		}
+
+		// Проверяем ресурсы
+		requirements := []struct {
+			ItemName string
+			Quantity int
+		}{
+			{"Береза", 20},
+			{"Березовый брус", 10},
+			{"Камень", 15},
+			{"Лесная ягода", 10},
+		}
+		canBuild := true
+		for _, req := range requirements {
+			qty, err := h.db.GetItemQuantityInInventory(player.ID, req.ItemName)
+			if err != nil || qty < req.Quantity {
+				canBuild = false
+				break
+			}
+		}
+		if !canBuild {
+			log.Printf("[DEBUG] Ресурсов недостаточно для строительства хижины")
+			callbackConfig := tgbotapi.NewCallback(callback.ID, "Ресурсов недостаточно.")
+			h.requestAPI(callbackConfig)
+			return
+		}
+
+		// Запускаем прогресс-бар
+		log.Printf("[DEBUG] Запуск строительства простой хижины")
+		callbackConfig := tgbotapi.NewCallback(callback.ID, "")
+		h.requestAPI(callbackConfig)
+		msg := tgbotapi.NewMessage(callback.Message.Chat.ID, "Идет строительство объекта \"Простая хижина\". Время строительства 120 секунд.")
+		sentMsg, _ := h.sendMessageWithResponse(msg)
+		go h.finishSimpleHutBuilding(userID, callback.Message.Chat.ID, sentMsg.MessageID)
+		return
+	} else if data == "no_craft_Простая хижина" {
+		log.Printf("[DEBUG] Нажата неактивная кнопка создания хижины")
+		callbackConfig := tgbotapi.NewCallback(callback.ID, "Ресурсов недостаточно.")
+		h.requestAPI(callbackConfig)
+		return
+	} else {
+		log.Printf("[DEBUG] Заглушка: Функция пока в разработке")
+		// msg := tgbotapi.NewMessage(callback.Message.Chat.ID, "🔨 Функция пока в разработке...")
+		// h.sendMessage(msg)
+		// callbackConfig := tgbotapi.NewCallback(callback.ID, "")
+		// h.requestAPI(callbackConfig)
+	}
 
 	// Обрабатываем callback'и от шахты
 	if strings.HasPrefix(data, "mine_stone_") {
@@ -2159,10 +2219,10 @@ func (h *BotHandlers) handleCallbackQuery(callback *tgbotapi.CallbackQuery) {
 		h.handleQuestDecline(callback.Message.Chat.ID, callback.ID, callback.Message.MessageID)
 	} else {
 		// Остальные callback
-		msg := tgbotapi.NewMessage(callback.Message.Chat.ID, "🔨 Функция пока в разработке...")
-		h.sendMessage(msg)
-		callbackConfig := tgbotapi.NewCallback(callback.ID, "")
-		h.requestAPI(callbackConfig)
+		// msg := tgbotapi.NewMessage(callback.Message.Chat.ID, "🔨 Функция пока в разработке...")
+		// h.sendMessage(msg)
+		// callbackConfig := tgbotapi.NewCallback(callback.ID, "")
+		// h.requestAPI(callbackConfig)
 	}
 }
 
@@ -3509,8 +3569,26 @@ func (h *BotHandlers) handleWeeklyQuests(message *tgbotapi.Message) {
 }
 
 func (h *BotHandlers) handleBuildings(message *tgbotapi.Message) {
-	buildingsText := `🏘️ Доступные постройки:
-Простая хижина /create_simple_hut`
+	userID := message.From.ID
+	player, err := h.db.GetPlayer(userID)
+	if err != nil {
+		msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка. Попробуйте позже.")
+		h.sendMessage(msg)
+		return
+	}
+
+	buildingsText := "🏘️ Доступные постройки:\n"
+	builtText := ""
+
+	if player.SimpleHutBuilt {
+		builtText += "🏠 Простая хижина\n"
+	} else {
+		buildingsText += "Простая хижина /create_simple_hut\n"
+	}
+
+	if builtText != "" {
+		buildingsText += "\nПостроено:\n" + builtText
+	}
 
 	msg := tgbotapi.NewMessage(message.Chat.ID, buildingsText)
 	h.sendMessage(msg)
@@ -4718,4 +4796,44 @@ func (h *BotHandlers) checkLorePagesQuestProgressSequential(userID int64, chatID
 			h.sendMessage(msg)
 		}
 	}
+}
+
+func (h *BotHandlers) finishSimpleHutBuilding(userID int64, chatID int64, messageID int) {
+	totalSeconds := 120
+	steps := 12 // обновлять каждые 10 секунд
+
+	// Сразу показываем прогресс-бар 0%
+	bar := h.createProgressBar(0, 100)
+	progressText := fmt.Sprintf("Идет строительство объекта \"Простая хижина\". Время строительства 120 секунд.\n\n%s 0%%", bar)
+	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, progressText)
+	h.requestAPI(editMsg)
+
+	for i := 1; i <= steps; i++ {
+		time.Sleep(time.Duration(totalSeconds/steps) * time.Second)
+		progress := i * 100 / steps
+		bar := h.createProgressBar(progress, 100)
+		progressText := fmt.Sprintf("Идет строительство объекта \"Простая хижина\". Время строительства 120 секунд.\n\n%s %d%%", bar, progress)
+		editMsg := tgbotapi.NewEditMessageText(chatID, messageID, progressText)
+		h.requestAPI(editMsg)
+	}
+
+	player, err := h.db.GetPlayer(userID)
+	if err != nil {
+		return
+	}
+	// Снимаем ресурсы
+	h.db.ConsumeItem(player.ID, "Береза", 20)
+	h.db.ConsumeItem(player.ID, "Березовый брус", 10)
+	h.db.ConsumeItem(player.ID, "Камень", 15)
+	h.db.ConsumeItem(player.ID, "Лесная ягода", 10)
+	// Отнимаем 5 сытости
+	h.db.UpdatePlayerSatiety(player.ID, -5)
+	h.db.UpdateSimpleHutBuilt(player.ID, true)
+	updatedPlayer, _ := h.db.GetPlayer(userID)
+	// Удаляем сообщение о прогрессе
+	deleteMsg := tgbotapi.NewDeleteMessage(chatID, messageID)
+	h.requestAPI(deleteMsg)
+	// Выводим финальное сообщение
+	msg := tgbotapi.NewMessage(chatID, fmt.Sprintf("Объект \"Простая хижина\" успешно построен!\nСытость %d/100", updatedPlayer.Satiety))
+	h.sendMessage(msg)
 }
