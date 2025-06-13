@@ -308,7 +308,11 @@ func (h *BotHandlers) handleNameInput(message *tgbotapi.Message) {
 
 🎁 Стартовые предметы добавлены в инвентарь:
 • Простой лук - 1 шт. (Прочность: 100/100)
-• Стрелы - 100 шт.`, player.Name, player.Level, player.Experience, player.Satiety)
+• Простой нож - 1 шт. (Прочность: 100/100)
+• Простой кирка - 1 шт. (Прочность: 100/100)
+• Простой топор - 1 шт. (Прочность: 100/100)
+• Стрелы - 100 шт.
+• Лесная ягода - 10 шт.`, player.Name, player.Level, player.Experience, player.Satiety)
 
 	msg := tgbotapi.NewMessage(message.Chat.ID, successText)
 	h.sendWithKeyboard(msg)
