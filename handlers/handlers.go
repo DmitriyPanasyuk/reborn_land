@@ -490,18 +490,21 @@ func (h *BotHandlers) handleEat(message *tgbotapi.Message) {
 	}
 
 	// Увеличиваем сытость
-	newSatiety := player.Satiety + 5
-	if newSatiety > 100 {
-		newSatiety = 100
-	}
-	err = h.db.UpdatePlayerSatiety(player.ID, newSatiety)
+	err = h.db.UpdatePlayerSatiety(player.ID, 5)
 	if err != nil {
 		log.Printf("Error updating satiety: %v", err)
 		return
 	}
 
+	// Получаем обновленное значение сытости
+	updatedPlayer, err := h.db.GetPlayer(message.From.ID)
+	if err != nil {
+		log.Printf("Error getting updated player: %v", err)
+		return
+	}
+
 	// Отправляем сообщение о съеденных ягодах
-	msg := tgbotapi.NewMessage(message.Chat.ID, fmt.Sprintf("Ты съел ягоды! Сытость: %d/100", newSatiety))
+	msg := tgbotapi.NewMessage(message.Chat.ID, fmt.Sprintf("Ты съел ягоды! Сытость: %d/100", updatedPlayer.Satiety))
 	h.sendMessage(msg)
 
 	// Проверяем прогресс квеста 7
