@@ -167,6 +167,8 @@ func (h *BotHandlers) handleMessage(message *tgbotapi.Message) {
 		h.handleReadPage6(message)
 	case "/read7":
 		h.handleReadPage7(message)
+	case "/read8":
+		h.handleReadPage8(message)
 	default:
 		// Неизвестная команда
 		msg := tgbotapi.NewMessage(message.Chat.ID, "Неизвестная команда. Используйте /start для начала игры.")
@@ -2116,8 +2118,8 @@ func (h *BotHandlers) handleCallbackQuery(callback *tgbotapi.CallbackQuery) {
 		callbackConfig := tgbotapi.NewCallback(callback.ID, "")
 		h.requestAPI(callbackConfig)
 		msg := tgbotapi.NewMessage(callback.Message.Chat.ID, "Идет строительство объекта \"Простая хижина\". Время строительства 120 секунд.")
-		sentMsg, _ := h.sendMessageWithResponse(msg)
-		go h.finishSimpleHutBuilding(userID, callback.Message.Chat.ID, sentMsg.MessageID)
+		h.sendMessageWithResponse(msg)
+		go h.startCrafting(userID, callback.Message.Chat.ID, "Простая хижина", 1)
 		return
 	} else if data == "no_craft_Простая хижина" {
 		log.Printf("[DEBUG] Нажата неактивная кнопка создания хижины")
@@ -2216,6 +2218,14 @@ func (h *BotHandlers) handleCallbackQuery(callback *tgbotapi.CallbackQuery) {
 		h.handleQuestAccept(userID, callback.Message.Chat.ID, questID, callback.ID, callback.Message.MessageID)
 	} else if strings.HasPrefix(data, "quest_decline_7") {
 		// Отказ от квеста 7
+		h.handleQuestDecline(callback.Message.Chat.ID, callback.ID, callback.Message.MessageID)
+	} else if strings.HasPrefix(data, "quest_accept_8") {
+		// Принятие квеста 8
+		questIDStr := strings.TrimPrefix(data, "quest_accept_")
+		questID, _ := strconv.Atoi(questIDStr)
+		h.handleQuestAccept(userID, callback.Message.Chat.ID, questID, callback.ID, callback.Message.MessageID)
+	} else if strings.HasPrefix(data, "quest_decline_8") {
+		// Отказ от квеста 8
 		h.handleQuestDecline(callback.Message.Chat.ID, callback.ID, callback.Message.MessageID)
 	} else {
 		// Остальные callback
@@ -3398,9 +3408,93 @@ func (h *BotHandlers) handleLore(message *tgbotapi.Message) {
 							}
 
 							if quest7.Status == "completed" {
-								msg := tgbotapi.NewMessage(message.Chat.ID, "🎉 Ты завершил всю цепочку ЛОР-квестов! Продолжение следует...")
-								h.sendMessage(msg)
-								return
+								// Квест 7 выполнен, проверяем квест 8
+								quest8, err := h.db.GetPlayerQuest(player.ID, 8)
+								if err != nil {
+									log.Printf("Error getting quest 8: %v", err)
+									msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка при получении квеста.")
+									h.sendMessage(msg)
+									return
+								}
+
+								if quest8 == nil || quest8.Status == "available" {
+									// Квест 8 еще не создан или доступен для принятия
+									if quest8 == nil {
+										// Создаем квест 8, если его нет
+										err := h.db.CreateQuest(player.ID, 8, 1) // Квест 8: построить простую хижину
+										if err != nil {
+											log.Printf("Error creating quest 8: %v", err)
+											msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка при создании квеста.")
+											h.sendMessage(msg)
+											return
+										}
+									}
+
+									// Проверяем, построена ли уже хижина
+									if player.SimpleHutBuilt {
+										// Если хижина уже построена, сразу завершаем квест
+										err = h.db.UpdateQuestStatus(player.ID, 8, "completed")
+										if err != nil {
+											log.Printf("Error completing quest 8: %v", err)
+											msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка при выполнении квеста.")
+											h.sendMessage(msg)
+											return
+										}
+
+										// Добавляем награды
+										err = h.db.UpdatePlayerExperience(player.ID, 10)
+										if err != nil {
+											log.Printf("Error updating player experience: %v", err)
+										}
+
+										err = h.db.AddItemToInventory(player.ID, "📖 Страница 8 «След древних»", 1)
+										if err != nil {
+											log.Printf("Error adding quest item to inventory: %v", err)
+										}
+
+										// Отправляем сообщение о выполнении квеста
+										questCompleteText := `🛖 Квест 8: Под крышей ВЫПОЛНЕН!
+Получена награда:
+🎖 10 опыта
+📖 Страница 8 «След древних»`
+
+										msg := tgbotapi.NewMessage(message.Chat.ID, questCompleteText)
+										h.sendMessage(msg)
+										return
+									}
+
+									// Показываем предложение квеста 8
+									questText := `🛖 Квест 8: Под крышей
+Задание: Построй простую хижину.
+Для выполнения задания необходимо проследовать в Постройки и выполнить команду создания простой хижины.
+Награда: 🎖 10 опыта + 📖 Страница 8 «След древних»`
+
+									msg := tgbotapi.NewMessage(message.Chat.ID, questText)
+									acceptBtn := tgbotapi.NewInlineKeyboardButtonData("Принять", "quest_accept_8")
+									declineBtn := tgbotapi.NewInlineKeyboardButtonData("Отказ", "quest_decline_8")
+									keyboard := tgbotapi.NewInlineKeyboardMarkup(
+										tgbotapi.NewInlineKeyboardRow(acceptBtn, declineBtn),
+									)
+									msg.ReplyMarkup = keyboard
+									h.sendMessage(msg)
+									return
+								}
+
+								if quest8.Status == "active" {
+									activeText := fmt.Sprintf(`Активный квест: 🛖 Квест 8: Под крышей
+Задание: Построй простую хижину (%d/1)
+Для выполнения задания необходимо проследовать в Постройки и выполнить команду создания простой хижины.
+Награда: 🎖 10 опыта + 📖 Страница 8 «След древних»`, quest8.Progress)
+									msg := tgbotapi.NewMessage(message.Chat.ID, activeText)
+									h.sendMessage(msg)
+									return
+								}
+
+								if quest8.Status == "completed" {
+									msg := tgbotapi.NewMessage(message.Chat.ID, "🎉 Ты завершил всю цепочку ЛОР-квестов! Продолжение следует...")
+									h.sendMessage(msg)
+									return
+								}
 							}
 						}
 					}
@@ -3632,12 +3726,14 @@ func (h *BotHandlers) handleLookPages(message *tgbotapi.Message) {
 			pageMap[6] = fmt.Sprintf("%s - %d шт. /read6", item.ItemName, item.Quantity)
 		} else if strings.Contains(item.ItemName, "📖 Страница 7") {
 			pageMap[7] = fmt.Sprintf("%s - %d шт. /read7", item.ItemName, item.Quantity)
+		} else if strings.Contains(item.ItemName, "📖 Страница 8") {
+			pageMap[8] = fmt.Sprintf("%s - %d шт. /read8", item.ItemName, item.Quantity)
 		}
 	}
 
 	// Создаем отсортированный список страниц
 	var pages []string
-	for i := 1; i <= 7; i++ {
+	for i := 1; i <= 8; i++ {
 		if page, exists := pageMap[i]; exists {
 			pages = append(pages, page)
 		}
@@ -3732,11 +3828,18 @@ func (h *BotHandlers) handleReadPage(message *tgbotapi.Message) {
 Как в костре трескается не дрова, а слова. Неслышные, шепчущие.
 Земля словно пыталась заговорить с тобой, но ещё не решалась."`
 		}
+		if strings.Contains(item.ItemName, "📖 Страница 8") && item.Quantity > 0 {
+			pageMap[8] = "📖 Страница 8 «След древних»"
+			pageTexts["📖 Страница 8 «След древних»"] = `📖 Страница 8 «След древних»
+
+"Ты начал находить странные вещи. Камень с гладкой гранью, словно вырезанной руками.
+Обломок кости с выжженным символом. Одинокую статую, стоящую посреди леса, покрытую мхом, но не разрушенную."`
+		}
 	}
 
 	// Создаем отсортированный список страниц
 	var availablePages []string
-	for i := 1; i <= 7; i++ {
+	for i := 1; i <= 8; i++ {
 		if page, exists := pageMap[i]; exists {
 			availablePages = append(availablePages, page)
 		}
@@ -4045,6 +4148,43 @@ func (h *BotHandlers) handleReadPage7(message *tgbotapi.Message) {
 "Иногда по ночам ты слышал, как шелестят листья без ветра.
 Как в костре трескается не дрова, а слова. Неслышные, шепчущие.
 Земля словно пыталась заговорить с тобой, но ещё не решалась."`
+
+	msg := tgbotapi.NewMessage(message.Chat.ID, pageText)
+	h.sendMessage(msg)
+}
+
+func (h *BotHandlers) handleReadPage8(message *tgbotapi.Message) {
+	userID := message.From.ID
+
+	// Получаем игрока
+	player, err := h.db.GetPlayer(userID)
+	if err != nil {
+		log.Printf("Error getting player: %v", err)
+		msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка. Попробуйте позже.")
+		h.sendMessage(msg)
+		return
+	}
+
+	// Проверяем наличие страницы 8 в инвентаре
+	pageQuantity, err := h.db.GetItemQuantityInInventory(player.ID, "📖 Страница 8 «След древних»")
+	if err != nil {
+		log.Printf("Error checking page in inventory: %v", err)
+		msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка. Попробуйте позже.")
+		h.sendMessage(msg)
+		return
+	}
+
+	if pageQuantity == 0 {
+		msg := tgbotapi.NewMessage(message.Chat.ID, "У вас нет восьмой страницы.")
+		h.sendMessage(msg)
+		return
+	}
+
+	// Показываем текст восьмой страницы
+	pageText := `📖 Страница 8 «След древних»
+
+"Ты начал находить странные вещи. Камень с гладкой гранью, словно вырезанной руками.
+Обломок кости с выжженным символом. Одинокую статую, стоящую посреди леса, покрытую мхом, но не разрушенную."`
 
 	msg := tgbotapi.NewMessage(message.Chat.ID, pageText)
 	h.sendMessage(msg)
@@ -4371,8 +4511,13 @@ func (h *BotHandlers) startCrafting(userID int64, chatID int64, itemName string,
 		}
 	}
 
-	// Вычисляем общее время крафта (20 секунд за один предмет)
-	totalDuration := quantity * 20
+	// Вычисляем общее время крафта
+	var totalDuration int
+	if itemName == "Простая хижина" {
+		totalDuration = 120
+	} else {
+		totalDuration = quantity * 20
+	}
 
 	// Отправляем сообщение о начале крафта
 	craftText := fmt.Sprintf(`Идет создание предмета "%s". Время создания %d сек.
@@ -4430,49 +4575,99 @@ func (h *BotHandlers) updateCraftingProgress(userID int64, chatID int64, message
 }
 
 func (h *BotHandlers) completeCrafting(userID int64, chatID int64, itemName string, quantity int, messageID int) {
-	// Получаем игрока
 	player, err := h.db.GetPlayer(userID)
 	if err != nil {
 		log.Printf("Error getting player: %v", err)
 		return
 	}
 
-	// Добавляем созданные предметы в инвентарь
+	if itemName == "Простая хижина" {
+		// Удаляем ресурсы
+		requirements := []struct {
+			ItemName string
+			Quantity int
+		}{
+			{"Береза", 20},
+			{"Березовый брус", 10},
+			{"Камень", 15},
+			{"Лесная ягода", 10},
+		}
+		for _, req := range requirements {
+			err := h.db.RemoveItemFromInventory(player.ID, req.ItemName, req.Quantity)
+			if err != nil {
+				log.Printf("Error removing item from inventory: %v", err)
+			}
+		}
+		// Обновляем статус хижины
+		err = h.db.UpdateSimpleHutBuilt(player.ID, true)
+		if err != nil {
+			log.Printf("Error updating simple hut status: %v", err)
+		}
+		// Проверяем квест 8
+		quest8, err := h.db.GetPlayerQuest(player.ID, 8)
+		if err != nil {
+			log.Printf("Error getting quest 8: %v", err)
+		} else if quest8 != nil {
+			if quest8.Status == "active" {
+				err = h.db.UpdateQuestProgress(player.ID, 8, 1)
+				if err != nil {
+					log.Printf("Error updating quest progress: %v", err)
+				}
+				if quest8.Progress+1 >= quest8.Target {
+					err = h.db.UpdateQuestStatus(player.ID, 8, "completed")
+					if err != nil {
+						log.Printf("Error completing quest 8: %v", err)
+					}
+					err = h.db.UpdatePlayerExperience(player.ID, 10)
+					if err != nil {
+						log.Printf("Error updating player experience: %v", err)
+					}
+					h.addPage8IfNotExists(player.ID)
+					questCompleteText := `🛖 Квест 8: Под крышей ВЫПОЛНЕН!
+Получена награда:
+🎖 10 опыта
+📖 Страница 8 «След древних»`
+					msg := tgbotapi.NewMessage(chatID, questCompleteText)
+					h.sendMessage(msg)
+				}
+			} else if quest8.Status == "completed" {
+				// Если квест уже завершён, но страницы нет — добавить её
+				h.addPage8IfNotExists(player.ID)
+			}
+		}
+		// Удаляем сообщение о крафте
+		deleteMsg := tgbotapi.NewDeleteMessage(chatID, messageID)
+		h.requestAPI(deleteMsg)
+		completeText := `✅ Строительство "Простая хижина" завершено!
+Теперь у вас есть укрытие от непогоды.`
+		msg := tgbotapi.NewMessage(chatID, completeText)
+		h.sendMessage(msg)
+		delete(h.craftingTimers, userID)
+		return
+	}
+
+	// Обычный крафт
 	if err := h.db.AddItemToInventory(player.ID, itemName, quantity); err != nil {
 		log.Printf("Error adding crafted items to inventory: %v", err)
 	}
-
-	// Отнимаем сытость (1 единица за каждый созданный предмет)
 	if err := h.db.UpdatePlayerSatiety(player.ID, -quantity); err != nil {
 		log.Printf("Error updating player satiety: %v", err)
 	}
-
-	// Получаем обновленные данные игрока для отображения сытости
 	updatedPlayer, err := h.db.GetPlayer(userID)
 	if err != nil {
 		log.Printf("Error getting updated player: %v", err)
-		// Если не удалось получить обновленные данные, используем старые
 		updatedPlayer = player
 	}
-
-	// Удаляем сообщение о крафте
 	deleteMsg := tgbotapi.NewDeleteMessage(chatID, messageID)
 	h.requestAPI(deleteMsg)
-
-	// Показываем результат с сытостью
 	resultText := fmt.Sprintf(`✅ Создание завершено!
 Получено: "%s" x%d
 Сытость: %d/100`, itemName, quantity, updatedPlayer.Satiety)
-
 	msg := tgbotapi.NewMessage(chatID, resultText)
 	h.sendMessage(msg)
-
-	// Проверяем прогресс квеста 3 (создание березовых брусов)
 	if itemName == "Березовый брус" {
 		h.checkBirchPlankQuestProgress(userID, chatID, player.ID, quantity)
 	}
-
-	// Убираем таймер
 	delete(h.craftingTimers, userID)
 }
 
@@ -4836,4 +5031,19 @@ func (h *BotHandlers) finishSimpleHutBuilding(userID int64, chatID int64, messag
 	// Выводим финальное сообщение
 	msg := tgbotapi.NewMessage(chatID, fmt.Sprintf("Объект \"Простая хижина\" успешно построен!\nСытость %d/100", updatedPlayer.Satiety))
 	h.sendMessage(msg)
+}
+
+// Добавить вспомогательную функцию:
+func (h *BotHandlers) addPage8IfNotExists(playerID int) {
+	qty, err := h.db.GetItemQuantityInInventory(playerID, "📖 Страница 8 «След древних»")
+	if err != nil {
+		log.Printf("Error checking for page 8: %v", err)
+		return
+	}
+	if qty == 0 {
+		err = h.db.AddItemToInventory(playerID, "📖 Страница 8 «След древних»", 1)
+		if err != nil {
+			log.Printf("Error adding page 8 to inventory: %v", err)
+		}
+	}
 }
