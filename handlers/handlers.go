@@ -32,6 +32,7 @@ type BotHandlers struct {
 	gatheringCooldowns      map[int64]time.Time   // Время окончания кулдауна сбора
 	huntingCooldowns        map[int64]time.Time   // Время окончания кулдауна охоты
 	playerLocation          map[int64]string      // Текущее местоположение игрока
+	restingTimers           map[int64]*time.Timer // Таймеры для отдыха
 }
 
 func New(bot *tgbotapi.BotAPI, db *database.DB) *BotHandlers {
@@ -54,6 +55,7 @@ func New(bot *tgbotapi.BotAPI, db *database.DB) *BotHandlers {
 		gatheringCooldowns:      make(map[int64]time.Time),
 		huntingCooldowns:        make(map[int64]time.Time),
 		playerLocation:          make(map[int64]string),
+		restingTimers:           make(map[int64]*time.Timer),
 	}
 }
 
@@ -68,6 +70,13 @@ func (h *BotHandlers) HandleUpdate(update tgbotapi.Update) {
 
 func (h *BotHandlers) handleMessage(message *tgbotapi.Message) {
 	userID := message.From.ID
+
+	// Проверяем, не отдыхает ли игрок
+	if _, exists := h.restingTimers[userID]; exists {
+		msg := tgbotapi.NewMessage(message.Chat.ID, "Нельзя совершить действие пока не завершен отдых.")
+		h.sendMessage(msg)
+		return
+	}
 
 	// Проверяем, ждем ли мы от пользователя имя
 	if h.waitingForName[userID] {
@@ -169,6 +178,10 @@ func (h *BotHandlers) handleMessage(message *tgbotapi.Message) {
 		h.handleReadPage7(message)
 	case "/read8":
 		h.handleReadPage8(message)
+	case "/open":
+		h.handleOpenHut(message)
+	case "/rest":
+		h.handleRest(message)
 	default:
 		// Неизвестная команда
 		msg := tgbotapi.NewMessage(message.Chat.ID, "Неизвестная команда. Используйте /start для начала игры.")
@@ -3678,7 +3691,7 @@ func (h *BotHandlers) handleBuildings(message *tgbotapi.Message) {
 	builtText := ""
 
 	if player.SimpleHutBuilt {
-		builtText += "🏠 Простая хижина\n"
+		builtText += "🏠 Простая хижина /open\n"
 	} else {
 		buildingsText += "Простая хижина /create_simple_hut\n"
 	}
@@ -5049,4 +5062,106 @@ func (h *BotHandlers) addPage8IfNotExists(playerID int) {
 			log.Printf("Error adding page 8 to inventory: %v", err)
 		}
 	}
+}
+
+func (h *BotHandlers) handleOpenHut(message *tgbotapi.Message) {
+	userID := message.From.ID
+
+	// Получаем игрока
+	player, err := h.db.GetPlayer(userID)
+	if err != nil {
+		log.Printf("Error getting player: %v", err)
+		msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка. Попробуйте позже.")
+		h.sendMessage(msg)
+		return
+	}
+
+	// Проверяем, построена ли хижина
+	if !player.SimpleHutBuilt {
+		msg := tgbotapi.NewMessage(message.Chat.ID, "У тебя еще нет простой хижины. Построй ее в разделе Постройки.")
+		h.sendMessage(msg)
+		return
+	}
+
+	// Отправляем сообщение о входе в хижину
+	hutText := `🛖 Ты заходишь в свою простую хижину.
+
+Деревянные стены скрипят на ветру, но внутри — тепло и спокойно.  
+Костёр ещё тлеет в углу, а рядом лежит твоя нехитрая утварь.  
+Это твоё первое убежище в этом мире.
+
+Здесь ты можешь:
+
+😴 Отдохнуть — восстановить 50 ед. сытости за 30 минут отдыха  /rest`
+
+	msg := tgbotapi.NewMessage(message.Chat.ID, hutText)
+	h.sendMessage(msg)
+}
+
+func (h *BotHandlers) handleRest(message *tgbotapi.Message) {
+	userID := message.From.ID
+
+	// Получаем игрока
+	player, err := h.db.GetPlayer(userID)
+	if err != nil {
+		log.Printf("Error getting player: %v", err)
+		msg := tgbotapi.NewMessage(message.Chat.ID, "Произошла ошибка. Попробуйте позже.")
+		h.sendMessage(msg)
+		return
+	}
+
+	// Проверяем, не отдыхает ли уже игрок
+	if _, exists := h.restingTimers[userID]; exists {
+		msg := tgbotapi.NewMessage(message.Chat.ID, "Ты уже отдыхаешь. Дождись окончания отдыха.")
+		h.sendMessage(msg)
+		return
+	}
+
+	// Отправляем начальное сообщение с прогресс-баром
+	bar := h.createProgressBar(0, 100)
+	progressText := fmt.Sprintf("Отдых начался. Время отдыха 30 минут.\n\n%s 0%%", bar)
+	msg := tgbotapi.NewMessage(message.Chat.ID, progressText)
+	progressMsg, _ := h.sendMessageWithResponse(msg)
+
+	// Запускаем таймер отдыха
+	totalSeconds := 1800 // 30 минут
+	steps := 30          // обновлять каждую минуту
+	messageID := progressMsg.MessageID
+
+	// Сохраняем ID сообщения в таймере
+	h.restingTimers[userID] = time.NewTimer(time.Duration(totalSeconds) * time.Second)
+
+	go func() {
+		for i := 1; i <= steps; i++ {
+			time.Sleep(time.Duration(totalSeconds/steps) * time.Second)
+			progress := i * 100 / steps
+			bar := h.createProgressBar(progress, 100)
+			progressText := fmt.Sprintf("Отдых начался. Время отдыха 30 минут.\n\n%s %d%%", bar, progress)
+			editMsg := tgbotapi.NewEditMessageText(message.Chat.ID, messageID, progressText)
+			h.requestAPI(editMsg)
+		}
+
+		// По истечении времени
+		<-h.restingTimers[userID].C
+		delete(h.restingTimers, userID)
+
+		// Удаляем сообщение с прогресс-баром
+		deleteMsg := tgbotapi.NewDeleteMessage(message.Chat.ID, messageID)
+		h.requestAPI(deleteMsg)
+
+		// Восстанавливаем сытость
+		err = h.db.UpdatePlayerSatiety(player.ID, 50)
+		if err != nil {
+			log.Printf("Error updating player satiety: %v", err)
+			return
+		}
+
+		// Получаем обновленные данные игрока
+		updatedPlayer, _ := h.db.GetPlayer(userID)
+
+		// Отправляем сообщение о завершении отдыха
+		resultText := fmt.Sprintf("Отдых завершен. Восстановлено 50 ед. сытости.\nСытость %d/100", updatedPlayer.Satiety)
+		resultMsg := tgbotapi.NewMessage(message.Chat.ID, resultText)
+		h.sendMessage(resultMsg)
+	}()
 }
