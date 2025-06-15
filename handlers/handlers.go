@@ -1478,7 +1478,7 @@ func (h *BotHandlers) completeHunting(userID int64, chatID int64, resourceName s
 	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, resultText)
 	h.editMessage(editMsg)
 
-	// Сохраняем ID сообщения с результатом
+	// Сохраняем ID сообщения с результатом в сессии
 	if session, exists := h.huntingSessions[userID]; exists {
 		session.ResultMessageID = messageID
 	}
@@ -2092,66 +2092,176 @@ func (h *BotHandlers) handleCallbackQuery(callback *tgbotapi.CallbackQuery) {
 	userID := callback.From.ID
 	data := callback.Data
 
-	log.Printf("[DEBUG] callback.Data: %s", data)
+	// Обрабатываем навигацию по страницам
+	if strings.HasPrefix(data, "page_") {
+		parts := strings.Split(data, "_")
+		if len(parts) != 3 {
+			return
+		}
 
-	if strings.HasPrefix(data, "craft_Простая хижина") {
-		log.Printf("[DEBUG] Обработка строительства простой хижины")
+		direction := parts[1]
+		currentPage, _ := strconv.Atoi(parts[2])
+
+		// Получаем игрока
 		player, err := h.db.GetPlayer(userID)
 		if err != nil {
-			log.Printf("[DEBUG] Ошибка получения игрока: %v", err)
-			callbackConfig := tgbotapi.NewCallback(callback.ID, "Ошибка получения данных игрока")
-			h.requestAPI(callbackConfig)
+			log.Printf("Error getting player: %v", err)
 			return
 		}
 
-		// Проверяем ресурсы
-		requirements := []struct {
-			ItemName string
-			Quantity int
-		}{
-			{"Береза", 20},
-			{"Березовый брус", 10},
-			{"Камень", 15},
-			{"Лесная ягода", 10},
+		// Получаем инвентарь игрока
+		inventory, err := h.db.GetPlayerInventory(player.ID)
+		if err != nil {
+			log.Printf("Error getting inventory: %v", err)
+			return
 		}
-		canBuild := true
-		for _, req := range requirements {
-			qty, err := h.db.GetItemQuantityInInventory(player.ID, req.ItemName)
-			if err != nil || qty < req.Quantity {
-				canBuild = false
-				break
+
+		// Создаем карту доступных страниц
+		pageMap := make(map[int]struct {
+			title string
+			text  string
+		})
+
+		// Определяем доступные страницы и их тексты
+		for _, item := range inventory {
+			if strings.Contains(item.ItemName, "📖 Страница 1") && item.Quantity > 0 {
+				pageMap[1] = struct {
+					title string
+					text  string
+				}{
+					title: "📖 Страница 1 «Забытая тишина»",
+					text:  "Мир не был уничтожен в битве. Он просто... забыл сам себя.\nГоды прошли — может, столетия, может, тысячелетия. Никто не знает точно. От былых королевств остались лишь заросшие руины, поросшие мхом камни и полустёртые знаки, выгравированные на обломках.",
+				}
+			}
+			if strings.Contains(item.ItemName, "📖 Страница 2") && item.Quantity > 0 {
+				pageMap[2] = struct {
+					title string
+					text  string
+				}{
+					title: "📖 Страница 2 «Пепел памяти»",
+					text:  "Люди исчезли. Не все, возможно, но память о них — точно.\nЗемля забыла их шаги. Знания рассыпались, будто песок в ветре. Остались лишь сны, смутные образы, и тихий зов из глубин мира.",
+				}
+			}
+			if strings.Contains(item.ItemName, "📖 Страница 3") && item.Quantity > 0 {
+				pageMap[3] = struct {
+					title string
+					text  string
+				}{
+					title: "📖 Страница 3 «Пробуждение»",
+					text:  "Ты — один из тех, кто откликнулся.\nНикто не сказал тебе, зачем ты проснулся. В этом нет наставников, богов или проводников. Только ты, дикая земля — и чувство, что всё это уже было. Что ты здесь не впервые.",
+				}
+			}
+			if strings.Contains(item.ItemName, "📖 Страница 4") && item.Quantity > 0 {
+				pageMap[4] = struct {
+					title string
+					text  string
+				}{
+					title: "📖 Страница 4 «Без имени»",
+					text:  "У тебя ничего нет. Ни дома, ни имени, ни цели. Только старая кирка, тёплый свет солнца и бескрайняя, живая земля, что будто наблюдает за каждым твоим шагом.",
+				}
+			}
+			if strings.Contains(item.ItemName, "📖 Страница 5") && item.Quantity > 0 {
+				pageMap[5] = struct {
+					title string
+					text  string
+				}{
+					title: "📖 Страница 5 «Искра перемен»",
+					text:  "Но ты чувствуешь — если построить хижину, зажечь огонь, добыть первый камень… что-то изменится.\nВ тебе. В этом месте. В самой памяти мира.\nВозможно, ты не просто выживший. Возможно, ты — начало нового.",
+				}
+			}
+			if strings.Contains(item.ItemName, "📖 Страница 6") && item.Quantity > 0 {
+				pageMap[6] = struct {
+					title string
+					text  string
+				}{
+					title: "📖 Страница 6 «Наблюдающий лес»",
+					text:  "Поначалу земля молчала. Ты копал, строил, охотился — и всё было, как будто в пустоте.\nНо с каждым ударом по камню, с каждым дымком над костром ты чувствовал, что что-то наблюдает. Не враждебное. Но древнее.",
+				}
+			}
+			if strings.Contains(item.ItemName, "📖 Страница 7") && item.Quantity > 0 {
+				pageMap[7] = struct {
+					title string
+					text  string
+				}{
+					title: "📖 Страница 7 «Шёпот ветра»",
+					text:  "Иногда по ночам ты слышал, как шелестят листья без ветра.\nКак в костре трескается не дрова, а слова. Неслышные, шепчущие.\nЗемля словно пыталась заговорить с тобой, но ещё не решалась.",
+				}
+			}
+			if strings.Contains(item.ItemName, "📖 Страница 8") && item.Quantity > 0 {
+				pageMap[8] = struct {
+					title string
+					text  string
+				}{
+					title: "📖 Страница 8 «След древних»",
+					text:  "Ты начал находить странные вещи. Камень с гладкой гранью, словно вырезанной руками.\nОбломок кости с выжженным символом. Одинокую статую, стоящую посреди леса, покрытую мхом, но не разрушенную.",
+				}
 			}
 		}
-		if !canBuild {
-			log.Printf("[DEBUG] Ресурсов недостаточно для строительства хижины")
-			callbackConfig := tgbotapi.NewCallback(callback.ID, "Ресурсов недостаточно.")
+
+		// Определяем следующую или предыдущую страницу
+		var targetPage int
+		if direction == "next" {
+			for i := currentPage + 1; i <= 8; i++ {
+				if _, exists := pageMap[i]; exists {
+					targetPage = i
+					break
+				}
+			}
+		} else if direction == "prev" {
+			for i := currentPage - 1; i >= 1; i-- {
+				if _, exists := pageMap[i]; exists {
+					targetPage = i
+					break
+				}
+			}
+		}
+
+		if targetPage == 0 {
+			// Если страница не найдена, отвечаем на callback
+			callbackConfig := tgbotapi.NewCallback(callback.ID, "")
 			h.requestAPI(callbackConfig)
 			return
 		}
 
-		// Запускаем прогресс-бар
-		log.Printf("[DEBUG] Запуск строительства простой хижины")
+		// Формируем текст сообщения
+		page := pageMap[targetPage]
+		text := fmt.Sprintf("%s\n\n%s\n\nСтраница %d из %d", page.title, page.text, targetPage, len(pageMap))
+
+		// Создаем кнопки навигации
+		var keyboard tgbotapi.InlineKeyboardMarkup
+		var row []tgbotapi.InlineKeyboardButton
+
+		// Кнопка "Назад" с callback_data
+		prevBtn := tgbotapi.NewInlineKeyboardButtonData("◀️ Назад", fmt.Sprintf("page_prev_%d", targetPage))
+		row = append(row, prevBtn)
+
+		// Кнопка "Дальше" с callback_data
+		nextBtn := tgbotapi.NewInlineKeyboardButtonData("Дальше ▶️", fmt.Sprintf("page_next_%d", targetPage))
+		row = append(row, nextBtn)
+
+		keyboard.InlineKeyboard = append(keyboard.InlineKeyboard, row)
+
+		// Обновляем сообщение
+		editMsg := tgbotapi.NewEditMessageTextAndMarkup(
+			callback.Message.Chat.ID,
+			callback.Message.MessageID,
+			text,
+			keyboard,
+		)
+		h.editMessage(editMsg)
+
+		// Отвечаем на callback
 		callbackConfig := tgbotapi.NewCallback(callback.ID, "")
 		h.requestAPI(callbackConfig)
-		msg := tgbotapi.NewMessage(callback.Message.Chat.ID, "Идет строительство объекта \"Простая хижина\". Время строительства 120 секунд.")
-		h.sendMessageWithResponse(msg)
-		go h.startCrafting(userID, callback.Message.Chat.ID, "Простая хижина", 1)
+
+		// Проверяем прогресс квеста 6 после успешного чтения страницы
+		h.checkLorePagesQuestProgressSequential(userID, callback.Message.Chat.ID, player.ID, targetPage)
+
 		return
-	} else if data == "no_craft_Простая хижина" {
-		log.Printf("[DEBUG] Нажата неактивная кнопка создания хижины")
-		callbackConfig := tgbotapi.NewCallback(callback.ID, "Ресурсов недостаточно.")
-		h.requestAPI(callbackConfig)
-		return
-	} else {
-		log.Printf("[DEBUG] Заглушка: Функция пока в разработке")
-		// msg := tgbotapi.NewMessage(callback.Message.Chat.ID, "🔨 Функция пока в разработке...")
-		// h.sendMessage(msg)
-		// callbackConfig := tgbotapi.NewCallback(callback.ID, "")
-		// h.requestAPI(callbackConfig)
 	}
 
-	// Обрабатываем callback'и от шахты
-	if strings.HasPrefix(data, "mine_stone_") {
+	// Обрабатываем остальные callback'и
+	if strings.HasPrefix(data, "mine_") {
 		parts := strings.Split(data, "_")
 		if len(parts) == 4 {
 			row, col := parts[2], parts[3]
@@ -2824,6 +2934,7 @@ func (h *BotHandlers) updateChoppingProgress(userID int64, chatID int64, message
 
 			// Обновляем прогресс бар
 			percentage := int((elapsed / float64(totalDuration)) * 100)
+
 			progressBar := h.createProgressBar(progress, totalDuration)
 
 			newText := fmt.Sprintf(`Началась рубка дерева "%s". Время рубки %d сек.
@@ -3725,46 +3836,129 @@ func (h *BotHandlers) handleLookPages(message *tgbotapi.Message) {
 		return
 	}
 
-	// Фильтруем только страницы и сортируем их по номерам
-	pageMap := make(map[int]string)
+	// Создаем карту доступных страниц
+	pageMap := make(map[int]struct {
+		title string
+		text  string
+	})
+
+	// Определяем доступные страницы и их тексты
 	for _, item := range inventory {
-		if strings.Contains(item.ItemName, "📖 Страница 1") {
-			pageMap[1] = fmt.Sprintf("%s - %d шт. /read1", item.ItemName, item.Quantity)
-		} else if strings.Contains(item.ItemName, "📖 Страница 2") {
-			pageMap[2] = fmt.Sprintf("%s - %d шт. /read2", item.ItemName, item.Quantity)
-		} else if strings.Contains(item.ItemName, "📖 Страница 3") {
-			pageMap[3] = fmt.Sprintf("%s - %d шт. /read3", item.ItemName, item.Quantity)
-		} else if strings.Contains(item.ItemName, "📖 Страница 4") {
-			pageMap[4] = fmt.Sprintf("%s - %d шт. /read4", item.ItemName, item.Quantity)
-		} else if strings.Contains(item.ItemName, "📖 Страница 5") {
-			pageMap[5] = fmt.Sprintf("%s - %d шт. /read5", item.ItemName, item.Quantity)
-		} else if strings.Contains(item.ItemName, "📖 Страница 6") {
-			pageMap[6] = fmt.Sprintf("%s - %d шт. /read6", item.ItemName, item.Quantity)
-		} else if strings.Contains(item.ItemName, "📖 Страница 7") {
-			pageMap[7] = fmt.Sprintf("%s - %d шт. /read7", item.ItemName, item.Quantity)
-		} else if strings.Contains(item.ItemName, "📖 Страница 8") {
-			pageMap[8] = fmt.Sprintf("%s - %d шт. /read8", item.ItemName, item.Quantity)
+		if strings.Contains(item.ItemName, "📖 Страница 1") && item.Quantity > 0 {
+			pageMap[1] = struct {
+				title string
+				text  string
+			}{
+				title: "📖 Страница 1 «Забытая тишина»",
+				text:  "Мир не был уничтожен в битве. Он просто... забыл сам себя.\nГоды прошли — может, столетия, может, тысячелетия. Никто не знает точно. От былых королевств остались лишь заросшие руины, поросшие мхом камни и полустёртые знаки, выгравированные на обломках.",
+			}
+		}
+		if strings.Contains(item.ItemName, "📖 Страница 2") && item.Quantity > 0 {
+			pageMap[2] = struct {
+				title string
+				text  string
+			}{
+				title: "📖 Страница 2 «Пепел памяти»",
+				text:  "Люди исчезли. Не все, возможно, но память о них — точно.\nЗемля забыла их шаги. Знания рассыпались, будто песок в ветре. Остались лишь сны, смутные образы, и тихий зов из глубин мира.",
+			}
+		}
+		if strings.Contains(item.ItemName, "📖 Страница 3") && item.Quantity > 0 {
+			pageMap[3] = struct {
+				title string
+				text  string
+			}{
+				title: "📖 Страница 3 «Пробуждение»",
+				text:  "Ты — один из тех, кто откликнулся.\nНикто не сказал тебе, зачем ты проснулся. В этом нет наставников, богов или проводников. Только ты, дикая земля — и чувство, что всё это уже было. Что ты здесь не впервые.",
+			}
+		}
+		if strings.Contains(item.ItemName, "📖 Страница 4") && item.Quantity > 0 {
+			pageMap[4] = struct {
+				title string
+				text  string
+			}{
+				title: "📖 Страница 4 «Без имени»",
+				text:  "У тебя ничего нет. Ни дома, ни имени, ни цели. Только старая кирка, тёплый свет солнца и бескрайняя, живая земля, что будто наблюдает за каждым твоим шагом.",
+			}
+		}
+		if strings.Contains(item.ItemName, "📖 Страница 5") && item.Quantity > 0 {
+			pageMap[5] = struct {
+				title string
+				text  string
+			}{
+				title: "📖 Страница 5 «Искра перемен»",
+				text:  "Но ты чувствуешь — если построить хижину, зажечь огонь, добыть первый камень… что-то изменится.\nВ тебе. В этом месте. В самой памяти мира.\nВозможно, ты не просто выживший. Возможно, ты — начало нового.",
+			}
+		}
+		if strings.Contains(item.ItemName, "📖 Страница 6") && item.Quantity > 0 {
+			pageMap[6] = struct {
+				title string
+				text  string
+			}{
+				title: "📖 Страница 6 «Наблюдающий лес»",
+				text:  "Поначалу земля молчала. Ты копал, строил, охотился — и всё было, как будто в пустоте.\nНо с каждым ударом по камню, с каждым дымком над костром ты чувствовал, что что-то наблюдает. Не враждебное. Но древнее.",
+			}
+		}
+		if strings.Contains(item.ItemName, "📖 Страница 7") && item.Quantity > 0 {
+			pageMap[7] = struct {
+				title string
+				text  string
+			}{
+				title: "📖 Страница 7 «Шёпот ветра»",
+				text:  "Иногда по ночам ты слышал, как шелестят листья без ветра.\nКак в костре трескается не дрова, а слова. Неслышные, шепчущие.\nЗемля словно пыталась заговорить с тобой, но ещё не решалась.",
+			}
+		}
+		if strings.Contains(item.ItemName, "📖 Страница 8") && item.Quantity > 0 {
+			pageMap[8] = struct {
+				title string
+				text  string
+			}{
+				title: "📖 Страница 8 «След древних»",
+				text:  "Ты начал находить странные вещи. Камень с гладкой гранью, словно вырезанной руками.\nОбломок кости с выжженным символом. Одинокую статую, стоящую посреди леса, покрытую мхом, но не разрушенную.",
+			}
 		}
 	}
 
-	// Создаем отсортированный список страниц
-	var pages []string
-	for i := 1; i <= 8; i++ {
-		if page, exists := pageMap[i]; exists {
-			pages = append(pages, page)
-		}
-	}
-
-	if len(pages) == 0 {
+	if len(pageMap) == 0 {
 		msg := tgbotapi.NewMessage(message.Chat.ID, "📖 У вас пока нет страниц.")
 		h.sendMessage(msg)
 		return
 	}
 
-	// Формируем сообщение со страницами
-	text := "📖 Ваши страницы:\n\n" + strings.Join(pages, "\n")
+	// Находим первую доступную страницу
+	var firstPage int
+	for i := 1; i <= 8; i++ {
+		if _, exists := pageMap[i]; exists {
+			firstPage = i
+			break
+		}
+	}
+
+	// Формируем текст сообщения
+	page := pageMap[firstPage]
+	text := fmt.Sprintf("%s\n\n%s\n\nСтраница %d из %d", page.title, page.text, firstPage, len(pageMap))
+
+	// Создаем кнопки навигации
+	var keyboard tgbotapi.InlineKeyboardMarkup
+	var row []tgbotapi.InlineKeyboardButton
+
+	// Кнопка "Назад" с callback_data
+	prevBtn := tgbotapi.NewInlineKeyboardButtonData("◀️ Назад", fmt.Sprintf("page_prev_%d", firstPage))
+	row = append(row, prevBtn)
+
+	// Кнопка "Дальше" с callback_data
+	// Кнопка "Дальше" активна, если есть следующая страница
+	nextBtn := tgbotapi.NewInlineKeyboardButtonData("Дальше ▶️", fmt.Sprintf("page_next_%d", firstPage))
+	row = append(row, nextBtn)
+
+	keyboard.InlineKeyboard = append(keyboard.InlineKeyboard, row)
+
+	// Отправляем сообщение с первой страницей
 	msg := tgbotapi.NewMessage(message.Chat.ID, text)
+	msg.ReplyMarkup = keyboard
 	h.sendMessage(msg)
+
+	// Проверяем прогресс квеста 6 после успешного чтения страницы
+	h.checkLorePagesQuestProgressSequential(message.From.ID, message.Chat.ID, player.ID, firstPage)
 }
 
 func (h *BotHandlers) handleReadPage(message *tgbotapi.Message) {
